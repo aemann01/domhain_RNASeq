@@ -1,0 +1,30 @@
+#PBS -N cutadapt
+#PBS -l select=1:ncpus=10:mem=300gb
+#PBS -l walltime=72:00:00
+#PBS -j oe
+#PBS -m abe
+
+# move to folder with data
+cd /scratch1/amann3/domhain_RNASeq-1.17.24/NS3597-VRichards-X8-22GLV5LT3-Lane1-3
+mkdir cutadapt
+
+# load modules
+module add cutadapt/4.1
+
+# run
+ls *_R1_*.fastq.gz | sed 's/_R1_001.fastq.gz//' | while read line; do
+	cutadapt \
+	-a AGATCGGAAGAG \
+	-A AGATCGGAAGAG \
+	--nextseq-trim=20 \
+	-o cutadapt/$line.1.trim.fastq.gz \
+	-p cutadapt/$line.2.trim.fastq.gz \
+	--trim-n \
+	--minimum-length 100 \
+	--max-n 0 \
+	-q 24,24 \
+        --cores=10 \
+	$line\_R1_001.fastq.gz \
+	$line\_R2_001.fastq.gz \
+	1>cutadapt/$line.trim.out; 
+	done

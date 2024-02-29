@@ -1,0 +1,29 @@
+#PBS -N silva_map
+#PBS -l select=1:ncpus=40:mem=750gb
+#PBS -l walltime=138:00:00
+#PBS -j oe
+#PBS -m abe
+#PBS -q bigmem
+
+# move to folder with data
+cd /scratch1/amann3/domhain_RNASeq-1.17.24/merged_Qfiltered
+
+# load modules
+module add bowtie2/2.5.2
+
+# run
+ls *.1.fastq.gz | sed 's/.1.fastq.gz//' | while read line; do 
+	bowtie2 -x /scratch1/amann3/domhain_RNASeq-1.17.24/rRNA_map/silva_rRNA.db \
+	-1 $line.1.fastq.gz \
+	-2 $line.2.fastq.gz \
+	--end-to-end  \
+	--qc-filter \
+	--no-unal \
+	--no-head \
+	--no-sq \
+	-t \
+	--threads 40 \
+	-S /scratch1/amann3/domhain_RNASeq-1.17.24/rRNA_map/$line.sam \
+	2>/scratch1/amann3/domhain_RNASeq-1.17.24/rRNA_map/$line.out \
+	1>/scratch1/amann3/domhain_RNASeq-1.17.24/rRNA_map/$line.err;
+	done

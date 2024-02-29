@@ -1,0 +1,27 @@
+#PBS -N silva_map
+#PBS -l select=1:ncpus=40:mem=750gb
+#PBS -l walltime=72:00:00
+#PBS -j oe
+#PBS -m abe
+#PBS -q bigmem
+
+# move to folder with data
+cd /scratch/amann3/merged_Qfiltered
+
+# load modules
+module add bowtie2/2.5.2
+
+# run
+bowtie2 -x /scratch/amann3/rRNA_map/silva_rRNA.db \
+	-1 DM00563V2PQ55.1.fastq.gz \
+	-2 DM00563V2PQ55.2.fastq.gz \
+	--end-to-end  \
+	--qc-filter \
+	--no-unal \
+	--no-head \
+	--no-sq \
+	-t \
+	--threads 40 \
+	-S /scratch/amann3/rRNA_map/DM00563V2PQ55.sam \
+	2>/scratch/amann3/rRNA_map/DM00563V2PQ55.out \
+	1>/scratch/amann3/rRNA_map/DM00563V2PQ55.err

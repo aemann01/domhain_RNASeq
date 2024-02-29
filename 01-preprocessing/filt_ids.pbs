@@ -1,0 +1,22 @@
+#PBS -N filt_ids
+#PBS -l select=1:ncpus=10:mem=750gb
+#PBS -l walltime=72:00:00
+#PBS -j oe
+#PBS -m abe
+#PBS -q bigmem
+
+# move to folder with data
+cd /scratch/amann3/human_map
+
+# get ids that mapped and remove sam files to free up space
+ls *sam | while read line; do awk '{print $1}' $line | sort | uniq > $line.ids; done
+rm *sam
+
+# do same with rRNA hits
+cd /scratch/amann3/rRNA_map
+ls *sam | while read line; do awk '{print $1}' $line | sort | uniq > $line.ids; done
+rm *sam
+
+# make directory for filtered reads
+cd /scratch/amann3
+mkdir filtered

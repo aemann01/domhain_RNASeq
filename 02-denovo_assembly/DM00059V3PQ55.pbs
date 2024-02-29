@@ -1,0 +1,14 @@
+#PBS -N DM00059V3PQ55-rnaSpades
+#PBS -l select=1:ncpus=40:mem=750gb
+#PBS -l walltime=72:00:00
+#PBS -j oe
+#PBS -m abe
+#PBS -q bigmem
+
+# change directory
+cd /scratch/amann3/filtered/
+
+# load module
+module add spades/3.15.5
+
+rnaspades.py -1 /scratch/amann3/filtered/DM00059V3PQ55.1.fastq.gz -2 /scratch/amann3/filtered/DM00059V3PQ55.2.fastq.gz -o /fastscratch/amann3/denovo_assembly/DM00059V3PQ55 --checkpoints all -m 750 -t 40

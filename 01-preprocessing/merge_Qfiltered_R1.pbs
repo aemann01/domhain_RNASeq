@@ -1,0 +1,12 @@
+#PBS -N merge_R1
+#PBS -l select=1:ncpus=1:mem=20gb
+#PBS -l walltime=72:00:00
+#PBS -j oe
+#PBS -m abe
+
+# move to folder with data
+cd /scratch1/amann3/domhain_RNASeq-1.17.24/
+mkdir merged_Qfiltered
+
+# run
+cat samp.ids | while read line; do cat NS3597-VRichards*/cutadapt/$line*.1.trim.fastq.gz > merged_Qfiltered/$line.1.fastq.gz; done

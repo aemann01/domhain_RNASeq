@@ -1,0 +1,16 @@
+#PBS -N DM00050V1PQ55-remove_human_rRNA
+#PBS -l select=1:ncpus=1:mem=750gb
+#PBS -l walltime=72:00:00
+#PBS -j oe
+#PBS -m abe
+#PBS -q bigmem
+
+# load modules
+module add python/3.9.7
+
+# now remove unwanted reads
+cd /scratch/amann3/filtered
+python /scratch/amann3/remove_seqs.py -f /scratch/amann3/merged_Qfiltered/DM00050V1PQ55.1.fastq.gz -i DM00050V1PQ55.filt.ids -o DM00050V1PQ55.1.fastq
+python /scratch/amann3/remove_seqs.py -f /scratch/amann3/merged_Qfiltered/DM00050V1PQ55.2.fastq.gz -i DM00050V1PQ55.filt.ids -o DM00050V1PQ55.2.fastq
+
+echo 'Filtering complete'

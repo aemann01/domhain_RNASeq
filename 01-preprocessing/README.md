@@ -187,6 +187,83 @@ ls *.1.fastq.gz | sed 's/.1.fastq.gz//' | while read line; do
 
 8. Remove rRNA and human sequences
 
-```bash
+First, get list of ids to remove
 
+```bash
+#PBS -N filt_ids
+#PBS -l select=1:ncpus=10:mem=750gb
+#PBS -l walltime=72:00:00
+#PBS -j oe
+#PBS -m abe
+#PBS -q bigmem
+
+# move to folder with data
+cd /scratch/amann3/human_map
+
+# get ids that mapped and remove sam files to free up space
+ls *sam | while read line; do awk '{print $1}' $line | sort | uniq > $line.ids; done
+rm *sam
+
+# do same with rRNA hits
+cd /scratch/amann3/rRNA_map
+ls *sam | while read line; do awk '{print $1}' $line | sort | uniq > $line.ids; done
+rm *sam
+
+# make directory for filtered reads
+cd /scratch/amann3
+mkdir filtered
+
+# concatenate filtered ids for each sample
+cd /scratch/amann3/human_map
+ls *ids | sed 's/.sam.ids//' | while read line; do cat $line.sam.ids /scratch/amann3/rRNA_map/$line.sam.ids | sort | uniq > /scratch/amann3/filtered/$line.filt.ids; done
+
+echo 'Reads to be filtered concatenated'
 ```
+
+Now merge together IDs, filter reads
+
+```bash
+# generate sample specific pbs scripts
+cat /home/amann3/hiv_rnaseq/sample.ids | while read line; do sed "s/SAMPLE/$line/g" example.pbs > $line.pbs; done
+```
+
+Example PBS file
+
+```bash
+#PBS -N SAMPLE-remove_human_rRNA
+#PBS -l select=1:ncpus=1:mem=750gb
+#PBS -l walltime=72:00:00
+#PBS -j oe
+#PBS -m abe
+#PBS -q bigmem
+
+# load modules
+module add python/3.9.7
+
+# now remove unwanted reads
+cd /scratch/amann3/filtered
+python /scratch/amann3/remove_seqs.py -f /scratch/amann3/merged_Qfiltered/SAMPLE.1.fastq.gz -i SAMPLE.filt.ids -o SAMPLE.1.fastq; done
+python /scratch/amann3/remove_seqs.py -f /scratch/amann3/merged_Qfiltered/SAMPLE.2.fastq.gz -i SAMPLE.filt.ids -o SAMPLE.2.fastq; done
+
+echo 'Filtering complete'
+```
+
+9. Denovo transcriptome assembly with RNASpades
+
+```bash
+#PBS -N SAMPLE-rnaSpades
+#PBS -l select=1:ncpus=40:mem=750gb
+#PBS -l walltime=138:00:00
+#PBS -j oe
+#PBS -m abe
+#PBS -q bigmem
+
+# change directory
+cd /scratch/amann3/filtered/
+
+# load module
+module add spades/3.15.5
+
+rnaspades.py -1 /scratch/amann3/filtered/SAMPLE.1.fastq -2 /scratch/amann3/filtered/SAMPLE.2.fastq -o /scratch/amann3/denovo_assembly/SAMPLE --checkpoints all -m 750 -t 40
+```
+
