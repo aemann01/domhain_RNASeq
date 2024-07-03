@@ -85,6 +85,44 @@ filtarcgenes = pd.merge(arcgenes, exploded_df, left_on="locustag", right_on="syn
 # save this to file for troubleshooting purposes
 filtarcgenes.to_csv('filtered_arc_genes.txt', index=False, sep="\t")
 
+# next, we know that stutter annotations (or fragmented annotations) are an issue with prokka, need to identify these genes so we can fix downstream after defining the genes that are in full syntenous operons
+
+# to give it some wiggle room (i.e., length distribution) first define a function to calculate the interquartile range
+# Function to calculate IQR (x2)
+def iqr(series):
+    iqr = series.quantile(0.75) - series.quantile(0.25)
+    return iqr * 2
+
+genlen_stats = filtarcgenes.groupby('EC').agg(
+    median_length=('length', 'median'),
+    IQR_length=('length', iqr)
+).reset_index()
+
+genlen_stats.columns = ['EC', 'med_len', 'IQR_len']
+
+# find genes that may be stutter annotated by prokka and flag for further investigation
+dups = filtarcgenes[filtarcgenes.duplicated(subset=['homdID', 'EC'], keep=False)]
+# calculate the sum of the length for each duplicated gene
+sumlen_dups = dups.groupby(['homdID', 'EC'])['length'].sum().reset_index()
+sumlen_dups.columns = ['homdID', 'EC', 'sum_length']
+# merge with the median length dataframe
+comparison = pd.merge(sumlen_dups, genlen_stats, on='EC')
+# what I want to know if the genes in this list really look like a duplicated gene (i.e., double the length of the expected median) or if they are less than that (and are therefore probably a stutter annotation)
+# calculate lower bound for the gene to be a duplicate
+comparison['lower_bound'] = 2 * comparison['med_len'] - comparison['IQR_len']
+# is summed length of suspected stutter genes is less than or equal to a suspected duplicate length?
+comparison['within_range'] = comparison.apply(
+    lambda row: row['sum_length'] <= row['lower_bound'], axis=1
+)
+# how many suspected true duplicate genes (False) compared to suspected stutter annotated genes (True) do we have?
+comparison['within_range'].value_counts()
+# using the true values query our filtarcgenes data frame to print out a list of locus tags that we will need to sum together before analysis
+# get list of true values
+comptrue = comparison[comparison['within_range']]
+stutter_genes = pd.merge(comptrue, filtarcgenes, on=['homdID', 'EC'])
+# write to file
+stutter_genes.to_csv('stutter_genes_to_fix.txt', index=False, sep="\t")
+
 # now group by homdID and get min/max coordinates for the operon
 filt_df = filtarcgenes.groupby("homdID")["length"].sum().reset_index().merge(filtarcgenes.groupby("homdID")["start"].min().reset_index()).merge(filtarcgenes.groupby("homdID")["end"].max().reset_index())
 # get actual operon length from start and end coordinates
@@ -177,11 +215,32 @@ sed -i "1i seqid\ttaxonomy" annotations
 Tree looks really good, go ahead and pull the genes from this analysis to run differential expression 
 
 ```bash
-# get arc genes of interest
-awk -F"\t" '{print $4}' filtered_arc_genes.txt | sed 's/ID=//' > arcGene.ids
+# filter arc genes from slicing script that are part of the genome ids that passed our length filter
+awk '{print $1}' filtered_ads_operon.txt | awk -F"|" '{print $1}' | while read line; do grep $line filtered_arc_genes.txt; done > lenfilt_arc_genes.txt
+# get arc genes of interest from read counts file
+awk -F"\t" '{print $4}' lenfilt_arc_genes.txt | sed 's/ID=//' | sort | uniq > arcGene.ids
 # pull these from the read counts table from homd
 cat arcGene.ids | while read line; do grep $line -w -m1 ~/domhain_RNAseq/03-star_map/02-HOMD_map/featurecounts/read_counts.txt; done > arcGene_read_counts.txt
+
+
+
+
+
+
+
+
+
 # add back in header
-sed "1i $(head -n1 ~/domhain_RNAseq/03-star_map/02-HOMD_map/featurecounts/read_counts.txt)" arcGene_read_counts.txt > temp
-mv temp arcGene_read_counts.txt
+sed "1i $(head -n1 ~/domhain_RNAseq/03-star_map/02-HOMD_map/featurecounts/read_counts.txt)" arcGene_read_counts.txt > temp\nmv temp arcGene_read_counts.txt
 ```
+
+Finally, need to sum any genes that are stutter annotated
+
+```python
+
+
+
+
+
+
+
