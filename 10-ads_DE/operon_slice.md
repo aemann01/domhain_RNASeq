@@ -219,28 +219,68 @@ Tree looks really good, go ahead and pull the genes from this analysis to run di
 awk '{print $1}' filtered_ads_operon.txt | awk -F"|" '{print $1}' | while read line; do grep $line filtered_arc_genes.txt; done > lenfilt_arc_genes.txt
 # get arc genes of interest from read counts file
 awk -F"\t" '{print $4}' lenfilt_arc_genes.txt | sed 's/ID=//' | sort | uniq > arcGene.ids
-# pull these from the read counts table from homd
-cat arcGene.ids | while read line; do grep $line -w -m1 ~/domhain_RNAseq/03-star_map/02-HOMD_map/featurecounts/read_counts.txt; done > arcGene_read_counts.txt
-
-
-
-
-
-
-
-
-
+# pull from read counts file
+parallel -a arcGene.ids -k "grep -w -m1 '{}' ~/domhain_RNAseq/03-star_map/02-HOMD_map/featurecounts/read_counts.txt"> arcGene_read_counts.txt
 # add back in header
-sed "1i $(head -n1 ~/domhain_RNAseq/03-star_map/02-HOMD_map/featurecounts/read_counts.txt)" arcGene_read_counts.txt > temp\nmv temp arcGene_read_counts.txt
+sed "1i $(head -n1 ~/domhain_RNAseq/03-star_map/02-HOMD_map/featurecounts/read_counts.txt)" arcGene_read_counts.txt > temp
+mv temp arcGene_read_counts.txt
+# remove any bogus whitespace
+sed -i 's/^[ \t]*//;s/[ \t]*$//' arcGene_read_counts.txt
 ```
 
 Finally, need to sum any genes that are stutter annotated
 
 ```python
+import pandas as pd
+import numpy as np
 
+# load data
+adsgenecount = pd.read_csv("arcGene_read_counts.txt", header=0, sep="\t")
+stuttergene = pd.read_csv("stutter_genes_to_fix.txt", header=0, sep="\t")
+# first replace the ID= string from the locus tags in our stutter fix file so they can be used to compare to the gene count file
+stuttergene['locustag'] = stuttergene['locustag'].str.replace("ID=", '')
+# get list grouped by homdID and EC 
+stutterlists = stuttergene.groupby(['homdID', 'EC'])['locustag'].apply(list).reset_index()
+# get list of lists from locus tag column
+list_of_lists = [row for row in stutterlists['locustag'].tolist()]
 
+# Initialize a dictionary to store summed values for each tag
+collapsed_results = {}
 
+# Iterate over lists in lists_column
+for sublist in list_of_lists:
+    # Initialize variables to store summed values dynamically
+    summed_values = np.zeros(adsgenecount.shape[1] - 1)  # Exclude GeneID column
 
+    # Sum values for each tag in sublist
+    for tag in sublist:
+        # Filter adsgenecount where GeneID matches current tag
+        filtered_row = adsgenecount[adsgenecount['Geneid'] == tag]
+        
+        # Check if any rows were filtered
+        if not filtered_row.empty:
+            # Sum all numeric columns except GeneID
+            numeric_columns = filtered_row.select_dtypes(include=[np.number]).columns
+            summed_values += filtered_row[numeric_columns].values[0]
 
+    # Store summed values in collapsed_results if at least one tag was found
+    if np.any(summed_values):
+        collapsed_results[sublist[0]] = summed_values.tolist()
+
+collapsed_df = pd.DataFrame.from_dict(collapsed_results, orient='index', columns=adsgenecount.keys()[1:]) # note, these will be fewer than previous analysis b/c of final operon length filter
+# now to clean up and merge them all together
+filtered_genecounts = adsgenecount[~adsgenecount['Geneid'].isin(stuttergene['locustag'])]
+# fix index
+filtered_genecounts = filtered_genecounts.set_index('Geneid')
+filtered_genecounts.index.name = None
+cleandf = pd.concat([filtered_genecounts, collapsed_df], axis=0)
+
+# are there missing values??
+# cleandf.isnull().any().any() # should return false
+# write to file
+cleandf.to_csv('arcGene_read_counts.cleaned.txt', index=True, sep="\t", na_rep='NA')
+```
+
+Now can use this file for differential expression analysis
 
 

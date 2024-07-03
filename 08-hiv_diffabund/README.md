@@ -220,25 +220,6 @@ coolmap(fit.cont)
 
 
 
-```R
-install.packages("ggpubr")
-library(ggpubr)
-
-options(ggrepel.max.overlaps = Inf)
-p <- ggmaplot(fit.cont, main = expression("HI" %->% "HUU"),
-   fdr = 0.05, fc = 4, size = 0.4,
-   palette = c("#1465AC", "#B31B21", "darkgray"),
-   genenames = as.vector(row.names(res)),
-   legend = "top", top = 0,
-   font.label = c("bold", 11),
-   font.legend = "bold",
-   font.main = "bold",
-   label.rectangle = T,
-   label.select = c("SEQF2748_01243", "SEQF2748_01244", "SEQF2748_01245", "SEQF2016_01287", "SEQF2016_01288", "SEQF2016_01289", "SEQF1998_00217", "SEQF1998_00218", "SEQF1998_00219", "SEQF1964_00410", "SEQF1964_00411", "SEQF1964_00412", "SEQF1964_00414", "SEQF2625_00202", "SEQF2625_00203", "SEQF2625_00204", "SEQF1766_00037", "SEQF1766_00038", "SEQF1766_00039"),
-   ggtheme = ggplot2::theme_minimal())
-p
-
-
 
 
 

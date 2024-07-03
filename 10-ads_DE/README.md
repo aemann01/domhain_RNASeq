@@ -26,7 +26,7 @@ metadata <- read.table("/home/allie/domhain_RNAseq/map.txt", header=T, sep="\t")
 metadata$aliquot_type <- sub("-", "", metadata$aliquot_type)
 row.names(metadata) <- metadata$sample_id
 # read in gene counts file
-genecounts <- read.table("arcGene_read_counts.txt", header=T, sep="\t", row.names=1)
+genecounts <- read.table("arcGene_read_counts.cleaned.txt", header=T, sep="\t", row.names=1)
 # get rid of weird empty column in genecounts
 genecounts <- genecounts[1:(length(genecounts)-1)]
 # fix sample names in gene counts so they match the metadata
