@@ -1,4 +1,4 @@
-## Differential Gene Expression Analysis Using DESeq2
+## Differential Gene Expression Analysis Using DESeq2 comparing Dentin cavitated teeth vs healthy teeth (H vs D)
 
 Load environment
 
@@ -19,7 +19,6 @@ library(DESeq2, warn.conflicts = F, quietly = T)
 library(apeglm, warn.conflicts = F, quietly = T)
 
 # Load data 
-
 setwd("/home/allie/domhain_RNAseq/07-ads_expression")
 metadata <- read.table("/home/allie/domhain_RNAseq/map.txt", header=T, sep="\t")
 # remove dashes from health categories or it will mess up downstream processing
@@ -27,8 +26,7 @@ metadata$aliquot_type <- sub("-", "", metadata$aliquot_type)
 row.names(metadata) <- metadata$sample_id
 # read in gene counts file
 genecounts <- read.table("arcGene_read_counts.cleaned.txt", header=T, sep="\t", row.names=1)
-# get rid of weird empty column in genecounts
-genecounts <- genecounts[1:(length(genecounts)-1)]
+
 # fix sample names in gene counts so they match the metadata
 colnames(genecounts) <- gsub(x = names(genecounts), pattern = "\\.", replacement = "-") 
 # filter metadata so that we only compare H to D
@@ -61,13 +59,14 @@ res <- results(se_star, alpha=0.05)
 res <- res[order(res$padj),]
 paste("number of genes with adjusted p value lower than 0.05: ", sum(res$padj < 0.05, na.rm=TRUE))
 summary(res)
-# [1] "number of genes with adjusted p value lower than 0.05:  587"
-# out of 4627 with nonzero total read count
+# [1] "number of genes with adjusted p value lower than 0.05:  595"
+
+# out of 4208 with nonzero total read count
 # adjusted p-value < 0.05
-# LFC > 0 (up)       : 531, 11%
-# LFC < 0 (down)     : 56, 1.2%
+# LFC > 0 (up)       : 537, 13%
+# LFC < 0 (down)     : 58, 1.4%
 # outliers [1]       : 0, 0%
-# low counts [2]     : 2814, 61%
+# low counts [2]     : 2396, 57%
 # (mean count < 1)
 # [1] see 'cooksCutoff' argument of ?results
 # [2] see 'independentFiltering' argument of ?results
@@ -77,13 +76,14 @@ resLFC <- lfcShrink(se_star, coef="tooth_health_H_vs_D", type="apeglm")
 resLFC <- resLFC[order(resLFC$padj),]
 paste("number of genes with adjusted p value lower than 0.05: ", sum(resLFC$padj < 0.05, na.rm=TRUE))
 summary(resLFC)
-# [1] "number of genes with adjusted p value lower than 0.05:  587"
-# out of 4627 with nonzero total read count
+# [1] "number of genes with adjusted p value lower than 0.05:  600"
+
+# out of 4208 with nonzero total read count
 # adjusted p-value < 0.1
-# LFC > 0 (up)       : 578, 12%
-# LFC < 0 (down)     : 107, 2.3%
+# LFC > 0 (up)       : 596, 14%
+# LFC < 0 (down)     : 119, 2.8%
 # outliers [1]       : 0, 0%
-# low counts [2]     : 2814, 61%
+# low counts [2]     : 2497, 59%
 # (mean count < 1)
 # [1] see 'cooksCutoff' argument of ?results
 # [2] see 'independentFiltering' argument of ?results
@@ -290,9 +290,7 @@ metadata <- read.table("/home/allie/domhain_RNAseq/map.txt", header=T, sep="\t")
 metadata$aliquot_type <- sub("-", "", metadata$aliquot_type)
 row.names(metadata) <- metadata$sample_id
 # read in gene counts file
-genecounts <- read.table("arcGene_read_counts.txt", header=T, sep="\t", row.names=1)
-# get rid of weird empty column in genecounts
-genecounts <- genecounts[1:(length(genecounts)-1)]
+genecounts <- read.table("arcGene_read_counts.cleaned.txt", header=T, sep="\t", row.names=1)
 # fix sample names in gene counts so they match the metadata
 colnames(genecounts) <- gsub(x = names(genecounts), pattern = "\\.", replacement = "-") 
 # filter by HIV group
@@ -329,11 +327,12 @@ res <- res[order(res$padj),]
 paste("number of genes with adjusted p value lower than 0.05: ", sum(res$padj < 0.05, na.rm=TRUE))
 summary(res)
 # [1] "number of genes with adjusted p value lower than 0.05:  52"
-# out of 1429 with nonzero total read count
+
+# out of 1427 with nonzero total read count
 # adjusted p-value < 0.05
 # LFC > 0 (up)       : 49, 3.4%
 # LFC < 0 (down)     : 3, 0.21%
-# outliers [1]       : 277, 19%
+# outliers [1]       : 276, 19%
 # low counts [2]     : 552, 39%
 # (mean count < 9)
 # [1] see 'cooksCutoff' argument of ?results
@@ -437,7 +436,7 @@ labgenes <- c(top10, low10)
 
 # Create volcano plot
 p <- EnhancedVolcano(res_ord,
-	lab = ifelse(res_ord$locus_tag %in% labgenes, res_ord$Species, ""),
+	lab = ifelse(res_ord$locus_tag %in% labgenes, paste(res_ord$Species, res_ord$gene, sep=" "), ""),
 	x = 'log2FoldChange',
 	y = 'padj',
 	FCcutoff = lfc,
@@ -459,6 +458,51 @@ p
 dev.off()
 # print to current window
 system("/home/allie/.iterm2/imgcat volcano-HI.HvD.pdf")
+
+# first need to split our target genes by whether they are more highly expressed in health or disease
+dfneg <- subset(sortdf, log2FoldChange < 0)
+dfpos <- subset(sortdf, log2FoldChange > 0)
+
+# get counts of genus + species
+posgroup <- dfpos %>% group_by(Genus, Species) %>% summarise(count = n(), hexcol = first(color), .groups = 'drop')
+neggroup <- dfneg %>% group_by(Genus, Species) %>% summarise(count = n(), hexcol = first(color), .groups = 'drop')
+
+# create color map for each dataframe
+colors <- setNames(posgroup$hexcol, paste(posgroup$Genus, posgroup$Species, sep="_"))
+
+# create treemap 
+pdf("postreemap-HI.pdf")
+treemap(posgroup,
+        index = c("Genus", "Species"),  # Hierarchical index
+        vSize = "count",                # Size of the rectangles
+        vColor = "hexcol", 
+        type = "color",
+        palette = colors,              # Color palette
+        border.col = "white",           # Border color of the rectangles
+        fontsize.labels = c(15, 10),    # Font size for labels at different levels
+        fontcolor.labels = c("black", "black"),  # Font color for labels
+        fontface.labels = c(2, 1),      # Font face for labels
+        bg.labels = "#CCCCCCDC",      # Background color for labels
+        align.labels = list(c("left", "top"), c("center", "center")))
+dev.off()
+system("/home/allie/.iterm2/imgcat postreemap-HI.pdf")
+# treemap for negative group
+colors <- setNames(neggroup$hexcol, paste(neggroup$Genus, neggroup$Species, sep="_"))
+pdf("negtreemap-HI.pdf")
+treemap(neggroup,
+        index = c("Genus", "Species"),  # Hierarchical index
+        vSize = "count",                # Size of the rectangles
+        vColor = "hexcol", 
+        type = "color",
+        palette = colors,              # Color palette
+        border.col = "white",           # Border color of the rectangles
+        fontsize.labels = c(15, 10),    # Font size for labels at different levels
+        fontcolor.labels = c("black", "black"),  # Font color for labels
+        fontface.labels = c(2, 1),      # Font face for labels
+        bg.labels = "#CCCCCCDC",      # Background color for labels
+        align.labels = list(c("left", "top"), c("center", "center")))
+dev.off()
+system("/home/allie/.iterm2/imgcat negtreemap-HI.pdf")
 ```
 
 HEU
@@ -497,13 +541,13 @@ res <- results(se_star, alpha=0.05)
 res <- res[order(res$padj),]
 paste("number of genes with adjusted p value lower than 0.05: ", sum(res$padj < 0.05, na.rm=TRUE))
 summary(res)
-# [1] "number of genes with adjusted p value lower than 0.05:  244"
-# out of 1436 with nonzero total read count
+# [1] "number of genes with adjusted p value lower than 0.05:  242"
+# out of 1434 with nonzero total read count
 # adjusted p-value < 0.05
-# LFC > 0 (up)       : 190, 13%
+# LFC > 0 (up)       : 188, 13%
 # LFC < 0 (down)     : 54, 3.8%
 # outliers [1]       : 371, 26%
-# low counts [2]     : 321, 22%
+# low counts [2]     : 322, 22%
 # (mean count < 6)
 # [1] see 'cooksCutoff' argument of ?results
 # [2] see 'independentFiltering' argument of ?results
@@ -513,13 +557,13 @@ resLFC <- lfcShrink(se_star, coef="tooth_health_H_vs_D", type="apeglm")
 resLFC <- resLFC[order(resLFC$padj),]
 paste("number of genes with adjusted p value lower than 0.05: ", sum(resLFC$padj < 0.05, na.rm=TRUE))
 summary(resLFC)
-# [1] "number of genes with adjusted p value lower than 0.05:  225"
-# out of 1436 with nonzero total read count
+# [1] "number of genes with adjusted p value lower than 0.05:  223"
+# out of 1434 with nonzero total read count
 # adjusted p-value < 0.1
-# LFC > 0 (up)       : 279, 19%
-# LFC < 0 (down)     : 61, 4.2%
+# LFC > 0 (up)       : 277, 19%
+# LFC < 0 (down)     : 61, 4.3%
 # outliers [1]       : 371, 26%
-# low counts [2]     : 283, 20%
+# low counts [2]     : 281, 20%
 # (mean count < 4)
 # [1] see 'cooksCutoff' argument of ?results
 # [2] see 'independentFiltering' argument of ?results
@@ -606,7 +650,7 @@ labgenes <- c(top10, low10)
 
 # Create volcano plot
 p <- EnhancedVolcano(res_ord,
-	lab = ifelse(res_ord$locus_tag %in% labgenes, res_ord$Species, ""),
+	lab = ifelse(res_ord$locus_tag %in% labgenes, paste(res_ord$Species, res_ord$gene, sep=" "), ""),
 	x = 'log2FoldChange',
 	y = 'padj',
 	FCcutoff = lfc,
@@ -627,6 +671,51 @@ pdf("volcano-HEU.HvD.pdf", width=15, height=10)
 p
 dev.off()
 system("/home/allie/.iterm2/imgcat volcano-HEU.HvD.pdf")
+
+# first need to split our target genes by whether they are more highly expressed in health or disease
+dfneg <- subset(sortdf, log2FoldChange < 0)
+dfpos <- subset(sortdf, log2FoldChange > 0)
+
+# get counts of genus + species
+posgroup <- dfpos %>% group_by(Genus, Species) %>% summarise(count = n(), hexcol = first(color), .groups = 'drop')
+neggroup <- dfneg %>% group_by(Genus, Species) %>% summarise(count = n(), hexcol = first(color), .groups = 'drop')
+
+# create color map for each dataframe
+colors <- setNames(posgroup$hexcol, paste(posgroup$Genus, posgroup$Species, sep="_"))
+
+# create treemap 
+pdf("postreemap-HEU.pdf")
+treemap(posgroup,
+        index = c("Genus", "Species"),  # Hierarchical index
+        vSize = "count",                # Size of the rectangles
+        vColor = "hexcol", 
+        type = "color",
+        palette = colors,              # Color palette
+        border.col = "white",           # Border color of the rectangles
+        fontsize.labels = c(15, 10),    # Font size for labels at different levels
+        fontcolor.labels = c("black", "black"),  # Font color for labels
+        fontface.labels = c(2, 1),      # Font face for labels
+        bg.labels = "#CCCCCCDC",      # Background color for labels
+        align.labels = list(c("left", "top"), c("center", "center")))
+dev.off()
+system("/home/allie/.iterm2/imgcat postreemap-HEU.pdf")
+# treemap for negative group
+colors <- setNames(neggroup$hexcol, paste(neggroup$Genus, neggroup$Species, sep="_"))
+pdf("negtreemap-HEU.pdf")
+treemap(neggroup,
+        index = c("Genus", "Species"),  # Hierarchical index
+        vSize = "count",                # Size of the rectangles
+        vColor = "hexcol", 
+        type = "color",
+        palette = colors,              # Color palette
+        border.col = "white",           # Border color of the rectangles
+        fontsize.labels = c(15, 10),    # Font size for labels at different levels
+        fontcolor.labels = c("black", "black"),  # Font color for labels
+        fontface.labels = c(2, 1),      # Font face for labels
+        bg.labels = "#CCCCCCDC",      # Background color for labels
+        align.labels = list(c("left", "top"), c("center", "center")))
+dev.off()
+system("/home/allie/.iterm2/imgcat negtreemap-HEU.pdf")
 ```
 
 HUU
@@ -665,15 +754,15 @@ res <- results(se_star, alpha=0.05)
 res <- res[order(res$padj),]
 paste("number of genes with adjusted p value lower than 0.05: ", sum(res$padj < 0.05, na.rm=TRUE))
 summary(res)
-# [1] "number of genes with adjusted p value lower than 0.05:  121"
+# [1] "number of genes with adjusted p value lower than 0.05:  108"
 
-# out of 1297 with nonzero total read count
+# out of 1220 with nonzero total read count
 # adjusted p-value < 0.05
-# LFC > 0 (up)       : 111, 8.6%
-# LFC < 0 (down)     : 10, 0.77%
-# outliers [1]       : 371, 29%
-# low counts [2]     : 312, 24%
-# (mean count < 5)
+# LFC > 0 (up)       : 100, 8.2%
+# LFC < 0 (down)     : 8, 0.66%
+# outliers [1]       : 346, 28%
+# low counts [2]     : 317, 26%
+# (mean count < 6)
 # [1] see 'cooksCutoff' argument of ?results
 # [2] see 'independentFiltering' argument of ?results
 
@@ -682,15 +771,15 @@ resLFC <- lfcShrink(se_star, coef="tooth_health_H_vs_D", type="apeglm")
 resLFC <- resLFC[order(resLFC$padj),]
 paste("number of genes with adjusted p value lower than 0.05: ", sum(resLFC$padj < 0.05, na.rm=TRUE))
 summary(resLFC)
-# [1] "number of genes with adjusted p value lower than 0.05:  121"
+# [1] "number of genes with adjusted p value lower than 0.05:  105"
 
-# out of 1297 with nonzero total read count
+# out of 1220 with nonzero total read count
 # adjusted p-value < 0.1
-# LFC > 0 (up)       : 153, 12%
-# LFC < 0 (down)     : 10, 0.77%
-# outliers [1]       : 371, 29%
-# low counts [2]     : 312, 24%
-# (mean count < 5)
+# LFC > 0 (up)       : 129, 11%
+# LFC < 0 (down)     : 8, 0.66%
+# outliers [1]       : 346, 28%
+# low counts [2]     : 260, 21%
+# (mean count < 4)
 # [1] see 'cooksCutoff' argument of ?results
 # [2] see 'independentFiltering' argument of ?results
 
@@ -776,7 +865,7 @@ labgenes <- c(top10, low10)
 
 # Create volcano plot
 p <- EnhancedVolcano(res_ord,
-	lab = ifelse(res_ord$locus_tag %in% labgenes, res_ord$Species, ""),
+	lab = ifelse(res_ord$locus_tag %in% labgenes, paste(res_ord$Species, res_ord$gene, sep=" "), ""),
 	x = 'log2FoldChange',
 	y = 'padj',
 	FCcutoff = lfc,
@@ -797,5 +886,50 @@ pdf("volcano-HUU.HvD.pdf", width=15, height=10)
 p
 dev.off()
 system("/home/allie/.iterm2/imgcat volcano-HUU.HvD.pdf")
+
+# first need to split our target genes by whether they are more highly expressed in health or disease
+dfneg <- subset(sortdf, log2FoldChange < 0)
+dfpos <- subset(sortdf, log2FoldChange > 0)
+
+# get counts of genus + species
+posgroup <- dfpos %>% group_by(Genus, Species) %>% summarise(count = n(), hexcol = first(color), .groups = 'drop')
+neggroup <- dfneg %>% group_by(Genus, Species) %>% summarise(count = n(), hexcol = first(color), .groups = 'drop')
+
+# create color map for each dataframe
+colors <- setNames(posgroup$hexcol, paste(posgroup$Genus, posgroup$Species, sep="_"))
+
+# create treemap 
+pdf("postreemap-HUU.pdf")
+treemap(posgroup,
+        index = c("Genus", "Species"),  # Hierarchical index
+        vSize = "count",                # Size of the rectangles
+        vColor = "hexcol", 
+        type = "color",
+        palette = colors,              # Color palette
+        border.col = "white",           # Border color of the rectangles
+        fontsize.labels = c(15, 10),    # Font size for labels at different levels
+        fontcolor.labels = c("black", "black"),  # Font color for labels
+        fontface.labels = c(2, 1),      # Font face for labels
+        bg.labels = "#CCCCCCDC",      # Background color for labels
+        align.labels = list(c("left", "top"), c("center", "center")))
+dev.off()
+system("/home/allie/.iterm2/imgcat postreemap-HUU.pdf")
+# treemap for negative group
+colors <- setNames(neggroup$hexcol, paste(neggroup$Genus, neggroup$Species, sep="_"))
+pdf("negtreemap-HUU.pdf")
+treemap(neggroup,
+        index = c("Genus", "Species"),  # Hierarchical index
+        vSize = "count",                # Size of the rectangles
+        vColor = "hexcol", 
+        type = "color",
+        palette = colors,              # Color palette
+        border.col = "white",           # Border color of the rectangles
+        fontsize.labels = c(15, 10),    # Font size for labels at different levels
+        fontcolor.labels = c("black", "black"),  # Font color for labels
+        fontface.labels = c(2, 1),      # Font face for labels
+        bg.labels = "#CCCCCCDC",      # Background color for labels
+        align.labels = list(c("left", "top"), c("center", "center")))
+dev.off()
+system("/home/allie/.iterm2/imgcat negtreemap-HUU.pdf")
 ```
 

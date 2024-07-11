@@ -191,8 +191,7 @@ trimal -in ads_operons.align.fna \
 	-out ads_operons.trim.fna \
 	-htmlout ads_operons.trim.html \
 	-gt 0.5 \
-	-resoverlap 0.5 \
-	-seqoverlap 50
+	-resoverlap 0.5 
 # build a tree with our trimmed alignment to make sure it looks ok
 rm *tre
 raxmlHPC-PTHREADS-SSE3 -T 40 \
