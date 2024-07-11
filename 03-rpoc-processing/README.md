@@ -168,10 +168,75 @@ ASV.num <- paste0("ASV", seq(ASV.seq), sep='')
 colnames(seqtab.nochim) <- ASV.num 
 write.table(data.frame("row_names"=rownames(seqtab.nochim),seqtab.nochim),"sequence_table.merged.txt", row.names=FALSE, quote=F, sep="\t")
 ```
-# 18. Assign taxonomy
+# 18a. Make database
+```sh
+mkdir database
+cd database
+grep ">" ../../homd_map/ALL_genomes.fna | sort | sed 's/|.*//' | uniq | sed 's/>//' > gff_files
+grep "gene=rpoC" ../../homd_map/ALL_genomes.gff | sed 's/\t/tab/g' | sed 's/.*ID=//g' | sed 's/;.*//' > rpoC_ids
+sed 's/_.*//' rpoC_ids > seqIDs
+#get seqID
+wget https://www.homd.org/ftp/genomes/PROKKA/current/SEQID_info.txt
+sed 's/ /\t/g' SEQID_info.txt | sed 's/\t.*https/\thttps/'| sed 's/\t.*GCA_/\tGCA_/' | sed 's/_[^_]*//2g' > seqIDs2GCA #format it so it is seqid and GCA
+wget https://ftp.ncbi.nlm.nih.gov/genomes/ASSEMBLY_REPORTS/assembly_summary_genbank.txt
+sed 's/ /_/g' assembly_summary_genbank.txt | awk '{print $1,$6}' | sed '1d' | sed '1d' | sed 's/ /\t/g' > gca2taxid #get just gca and taxid colum
+sed 's/_.*//' rpoC_ids > rpoc_seqs #format rpoc ref seqs with ID
+for i in `cat rpoc_seqs`; do grep $i seqIDs2GCA | awk '{print $2}'; done > GCAs #get the GCA for refrence
+parallel -a GCAs -j 7 -k "grep '{}' gca2taxid"> taxid
+#check for missing ids
+awk '{print $1}' taxid > tax_acc
+awk '{print $2}' seqIDs2GCA | sed '1d'> GCA_rpoc 
+cat GCA_rpoc tax_acc > all_ids
+grep -f <(sort all_ids | uniq -u) all_ids > missed_ids
+parallel -a missed_ids -j 7 -k "grep '{}' gca2taxid"> taxid2
+cat taxid taxid2 > all_taxids
+awk '{print $1}' all_taxids > tax_acc
+cat GCA_rpoc tax_acc > all_ids
+grep -f <(sort all_ids | uniq -u) all_ids > missed_ids
+#find missing ID GCA
+wget https://ftp.ncbi.nlm.nih.gov/genomes/ASSEMBLY_REPORTS/assembly_summary_genbank_historical.txt
+for i in `cat missed_ids`; do grep -m 1 $i assembly_summary_genbank_historical.txt | awk '{print $1, $6}'; done > taxid3 #get the GCA for refrence
+cat taxid taxid2 taxid3 > all_taxids
+awk '{print $1}' all_taxids > tax_acc
+cat GCA_rpoc tax_acc > all_ids
+grep -f <(sort all_ids | uniq -u) all_ids > missed_ids
+#manually involving stuff
+#BE CAREFUL HERE
+sed 's/\..[1-2]*//' missed_ids| while read line; do grep -m 1 $line assembly_summary_genbank.txt | awk '{print $1, $6}'; done > taxid4 #get the GCA for refrence
+sed  -i '1d' missed_ids
+paste missed_ids taxid4 > temp
+awk '{print $1, $3}' temp > taxid4
+cat taxid taxid2 taxid3 taxid4 | sed 's/ /\t/' > all_taxids
+awk '{print $1}' all_taxids > tax_acc
+cat GCA_rpoc tax_acc > all_ids
+grep -f <(sort all_ids | uniq -u) all_ids > missed_ids
+#get just uniq GCA
+sort all_taxids | uniq > GCA_2_taxid
+sort rpoc_seqs | uniq | wc -l #sanity check
+parallel -a rpoc_seqs -j 7 -k "grep '{}' seqIDs2GCA"> seqf2GCA_rpoc
+python3 GCA2taxid.py
+awk '{print $3}' acc_taxids.tsv > taxids
+paste rpoc_seqs taxids | sed 's/\t/|kraken:taxid|/' | sed 's/\t/ /' | sed 's/^/>/' > fixed_headers
+#get sequences
+gffread -x - -g ../../homd_map/ALL_genomes.fna ../../homd_map/ALL_genomes.gff | awk '!/^>/ { printf "%s", $0; n = "\n" } /^>/ { print n $0; n = "" }END { printf "%s", n }' > all_genomes.fasta 
+
+parallel -a rpoC_ids -j 7 -k "grep -m 1 -A 1 '{}' all_genomes.fasta"> rpoc_genes
+
+grep -v ">" rpoc_genes > seqs
+paste fixed_headers seqs | sed 's/\t/\n/' > rpoc_ref.fa
+
+mkdir kraken_homd
+kraken2-build --download-taxonomy --db kraken_homd/
+kraken2-build --add-to-library rpoc_ref.fa --db kraken_homd/
+kraken2-build --build --max-db-size 8000000000 --db kraken_homd/
+```
+# 18b. Assign taxonomy
 ```sh 
+wget https://ftp.ncbi.nlm.nih.gov/pub/taxonomy/new_taxdump/new_taxdump.tar.gz
+tar -xvzf new_taxdump.tar.gz
+cd ../
 #taxonomic assignment
-kraken2 --db ~/databases/kraken_rpoc_v0.2.0 \
+kraken2 --db ~/databases/kraken_homd \
 	--threads 6 \
 	--use-names \
 	--output rep_set.kraken.out rep_set.fa \
@@ -180,7 +245,7 @@ kraken2 --db ~/databases/kraken_rpoc_v0.2.0 \
 # 19. Get full taxonomy
 ```sh
 awk -F"\t" '{print $3}' rep_set.kraken.out | sed 's/^.*(//' | sed 's/taxid //' | sed 's/)//' > taxids
-sed "s/\t//g" ~/ref_db/ncbi_taxonomy/rankedlineage.dmp > rankedlineage.dmp
+sed "s/\t//g" ./database/rankedlineage.dmp > rankedlineage.dmp
 sort -t "|" -k 1b,1 rankedlineage.dmp > rankedlineage_sorted
 cat rankedlineage_sorted | sed 's/|\{2,\}/|/g' > rankedlineage_clean
 # add unclassified to taxonomy file
@@ -211,3 +276,33 @@ python fix_taxonomy.py taxonomy_bac.txt > temp
 mv temp taxonomy_bac.txt
 sed -i 's/;/\t/g' taxonomy_bac.txt
 ```
+# 23. Make a tree
+```sh
+mafft --thread 7 rep_set.filt.fa > rep_set.align.fa
+rsync -a ./rep_set.align.fa scrull@slogin.palmetto.clemson.edu:/scratch/scrull/hiv_rnaseq/rpoc
+```
+Run raxml on palmetto
+```sh
+#!/bin/bash
+
+#SBATCH --job-name rpoc_tree
+#SBATCH --nodes 1
+#SBATCH --tasks-per-node 70
+#SBATCH --cpus-per-task 1
+#SBATCH --mem 750gb
+#SBATCH --time 72:00:00
+#SBATCH --constraint interconnect_fdr
+#SBATCH --output=%x.%j.out
+#SBATCH --error=%x.%j.err
+
+# load module
+module add raxml/8.2.12
+
+# move into scratch
+cd /scratch/scrull/hiv_rnaseq/rpoc
+
+raxmlHPC-PTHREADS-SSE3 -T 70 -m GTRCAT -c 25 -e 0.001 -p 31514 -f a -N 100 -x 02938 -n ref.tre -s rep_set.align.fa
+```
+# 24. Find the sequence id the kraken2 datbase matched to
+```sh
+sed 's/|.*//' lineages | while read line; do grep -c $line ./database/rpoc_ref.fa; done > seqs
