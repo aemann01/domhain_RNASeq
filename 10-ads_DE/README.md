@@ -180,16 +180,16 @@ res_ord$color[is.na(res_ord$color)] <- "#808080"
 # get key value pairs for plotting
 colormap <- setNames(res_ord$color, res_ord$Genus)
 
-# finally get a list of the top 10 genes (based on highest p value) to label on the volcano plot
+# finally get a list of the top 5 genes (based on highest log fold change) to label on the volcano plot
 tempdf <- res_ord[res_ord$target_gene == TRUE,]
 # sort the dataframe by logfold change
 sortdf <- tempdf[order(tempdf$log2FoldChange),]
-# get top 10 genes for disease
-low10 <- head(sortdf$locus_tag, 10)
-# negative top 10
-top10 <- tail(sortdf$locus_tag, 10)
+# get top genes for disease
+low <- head(sortdf$locus_tag, 5)
+# negative top 
+top <- tail(sortdf$locus_tag, 5)
 # concatenate
-labgenes <- c(top10, low10)
+labgenes <- c(top, low)
 
 # Create volcano plot
 p <- EnhancedVolcano(res_ord,
@@ -224,8 +224,8 @@ Now I want to make a companion figure for the volcano plot that illustrates the 
 library(treemap)
 
 # first need to split our target genes by whether they are more highly expressed in health or disease
-dfneg <- subset(sortdf, log2FoldChange < 0)
-dfpos <- subset(sortdf, log2FoldChange > 0)
+dfDall <- subset(sortdf, log2FoldChange < 0)
+dfHall <- subset(sortdf, log2FoldChange > 0)
 
 # get counts of genus + species
 posgroup <- dfpos %>% group_by(Genus, Species) %>% summarise(count = n(), hexcol = first(color), .groups = 'drop')
@@ -268,6 +268,8 @@ treemap(neggroup,
 dev.off()
 system("/home/allie/.iterm2/imgcat negtreemap.pdf")
 ```
+
+I'm not a super fan of this visualization -- will use this code to create a bubble chart below
 
 HIV Status Volcano Plots H v D
 --------------------------------------
@@ -326,15 +328,15 @@ res <- results(se_star, alpha=0.05)
 res <- res[order(res$padj),]
 paste("number of genes with adjusted p value lower than 0.05: ", sum(res$padj < 0.05, na.rm=TRUE))
 summary(res)
-# [1] "number of genes with adjusted p value lower than 0.05:  52"
+# [1] "number of genes with adjusted p value lower than 0.05:  99"
 
-# out of 1427 with nonzero total read count
+# out of 1455 with nonzero total read count
 # adjusted p-value < 0.05
-# LFC > 0 (up)       : 49, 3.4%
-# LFC < 0 (down)     : 3, 0.21%
-# outliers [1]       : 276, 19%
-# low counts [2]     : 552, 39%
-# (mean count < 9)
+# LFC > 0 (up)       : 74, 5.1%
+# LFC < 0 (down)     : 25, 1.7%
+# outliers [1]       : 291, 20%
+# low counts [2]     : 500, 34%
+# (mean count < 7)
 # [1] see 'cooksCutoff' argument of ?results
 # [2] see 'independentFiltering' argument of ?results
 
@@ -343,14 +345,15 @@ resLFC <- lfcShrink(se_star, coef="tooth_health_H_vs_D", type="apeglm")
 resLFC <- resLFC[order(resLFC$padj),]
 paste("number of genes with adjusted p value lower than 0.05: ", sum(resLFC$padj < 0.05, na.rm=TRUE))
 summary(resLFC)
-# [1] "number of genes with adjusted p value lower than 0.05:  45"
-# out of 1429 with nonzero total read count
+# [1] "number of genes with adjusted p value lower than 0.05:  91"
+
+# out of 1455 with nonzero total read count
 # adjusted p-value < 0.1
-# LFC > 0 (up)       : 81, 5.7%
-# LFC < 0 (down)     : 12, 0.84%
-# outliers [1]       : 277, 19%
-# low counts [2]     : 431, 30%
-# (mean count < 5)
+# LFC > 0 (up)       : 158, 11%
+# LFC < 0 (down)     : 33, 2.3%
+# outliers [1]       : 291, 20%
+# low counts [2]     : 416, 29%
+# (mean count < 4)
 # [1] see 'cooksCutoff' argument of ?results
 # [2] see 'independentFiltering' argument of ?results
 
@@ -423,16 +426,16 @@ res_ord$color[is.na(res_ord$color)] <- "#808080"
 # get key value pairs for plotting
 colormap <- setNames(res_ord$color, res_ord$Genus)
 
-# finally get a list of the top 10 genes (based on log fold change) to label on the volcano plot
+# finally get a list of the top 5 genes (based on log fold change) to label on the volcano plot
 tempdf <- res_ord[res_ord$target_gene == TRUE,]
 # sort the dataframe by logfold change
 sortdf <- tempdf[order(tempdf$log2FoldChange),]
-# get top 10 genes for disease
-low10 <- head(sortdf$locus_tag, 10)
+# get top genes for disease
+low <- head(sortdf$locus_tag, 5)
 # negative top 10
-top10 <- tail(sortdf$locus_tag, 10)
+top <- tail(sortdf$locus_tag, 5)
 # concatenate
-labgenes <- c(top10, low10)
+labgenes <- c(top, low)
 
 # Create volcano plot
 p <- EnhancedVolcano(res_ord,
@@ -459,50 +462,9 @@ dev.off()
 # print to current window
 system("/home/allie/.iterm2/imgcat volcano-HI.HvD.pdf")
 
-# first need to split our target genes by whether they are more highly expressed in health or disease
-dfneg <- subset(sortdf, log2FoldChange < 0)
-dfpos <- subset(sortdf, log2FoldChange > 0)
-
-# get counts of genus + species
-posgroup <- dfpos %>% group_by(Genus, Species) %>% summarise(count = n(), hexcol = first(color), .groups = 'drop')
-neggroup <- dfneg %>% group_by(Genus, Species) %>% summarise(count = n(), hexcol = first(color), .groups = 'drop')
-
-# create color map for each dataframe
-colors <- setNames(posgroup$hexcol, paste(posgroup$Genus, posgroup$Species, sep="_"))
-
-# create treemap 
-pdf("postreemap-HI.pdf")
-treemap(posgroup,
-        index = c("Genus", "Species"),  # Hierarchical index
-        vSize = "count",                # Size of the rectangles
-        vColor = "hexcol", 
-        type = "color",
-        palette = colors,              # Color palette
-        border.col = "white",           # Border color of the rectangles
-        fontsize.labels = c(15, 10),    # Font size for labels at different levels
-        fontcolor.labels = c("black", "black"),  # Font color for labels
-        fontface.labels = c(2, 1),      # Font face for labels
-        bg.labels = "#CCCCCCDC",      # Background color for labels
-        align.labels = list(c("left", "top"), c("center", "center")))
-dev.off()
-system("/home/allie/.iterm2/imgcat postreemap-HI.pdf")
-# treemap for negative group
-colors <- setNames(neggroup$hexcol, paste(neggroup$Genus, neggroup$Species, sep="_"))
-pdf("negtreemap-HI.pdf")
-treemap(neggroup,
-        index = c("Genus", "Species"),  # Hierarchical index
-        vSize = "count",                # Size of the rectangles
-        vColor = "hexcol", 
-        type = "color",
-        palette = colors,              # Color palette
-        border.col = "white",           # Border color of the rectangles
-        fontsize.labels = c(15, 10),    # Font size for labels at different levels
-        fontcolor.labels = c("black", "black"),  # Font color for labels
-        fontface.labels = c(2, 1),      # Font face for labels
-        bg.labels = "#CCCCCCDC",      # Background color for labels
-        align.labels = list(c("left", "top"), c("center", "center")))
-dev.off()
-system("/home/allie/.iterm2/imgcat negtreemap-HI.pdf")
+# get object for bubble plot 
+dfDHI <- subset(sortdf, log2FoldChange < 0)
+dfHHI <- subset(sortdf, log2FoldChange > 0)
 ```
 
 HEU
@@ -542,6 +504,7 @@ res <- res[order(res$padj),]
 paste("number of genes with adjusted p value lower than 0.05: ", sum(res$padj < 0.05, na.rm=TRUE))
 summary(res)
 # [1] "number of genes with adjusted p value lower than 0.05:  242"
+
 # out of 1434 with nonzero total read count
 # adjusted p-value < 0.05
 # LFC > 0 (up)       : 188, 13%
@@ -558,6 +521,7 @@ resLFC <- resLFC[order(resLFC$padj),]
 paste("number of genes with adjusted p value lower than 0.05: ", sum(resLFC$padj < 0.05, na.rm=TRUE))
 summary(resLFC)
 # [1] "number of genes with adjusted p value lower than 0.05:  223"
+
 # out of 1434 with nonzero total read count
 # adjusted p-value < 0.1
 # LFC > 0 (up)       : 277, 19%
@@ -641,12 +605,12 @@ colormap <- setNames(res_ord$color, res_ord$Genus)
 tempdf <- res_ord[res_ord$target_gene == TRUE,]
 # sort the dataframe by logfold change
 sortdf <- tempdf[order(tempdf$log2FoldChange),]
-# get top 10 genes for disease
-low10 <- head(sortdf$locus_tag, 10)
-# negative top 10
-top10 <- tail(sortdf$locus_tag, 10)
+# get top genes for disease
+low <- head(sortdf$locus_tag, 5)
+# negative top
+top <- tail(sortdf$locus_tag, 5)
 # concatenate
-labgenes <- c(top10, low10)
+labgenes <- c(top, low)
 
 # Create volcano plot
 p <- EnhancedVolcano(res_ord,
@@ -673,49 +637,8 @@ dev.off()
 system("/home/allie/.iterm2/imgcat volcano-HEU.HvD.pdf")
 
 # first need to split our target genes by whether they are more highly expressed in health or disease
-dfneg <- subset(sortdf, log2FoldChange < 0)
-dfpos <- subset(sortdf, log2FoldChange > 0)
-
-# get counts of genus + species
-posgroup <- dfpos %>% group_by(Genus, Species) %>% summarise(count = n(), hexcol = first(color), .groups = 'drop')
-neggroup <- dfneg %>% group_by(Genus, Species) %>% summarise(count = n(), hexcol = first(color), .groups = 'drop')
-
-# create color map for each dataframe
-colors <- setNames(posgroup$hexcol, paste(posgroup$Genus, posgroup$Species, sep="_"))
-
-# create treemap 
-pdf("postreemap-HEU.pdf")
-treemap(posgroup,
-        index = c("Genus", "Species"),  # Hierarchical index
-        vSize = "count",                # Size of the rectangles
-        vColor = "hexcol", 
-        type = "color",
-        palette = colors,              # Color palette
-        border.col = "white",           # Border color of the rectangles
-        fontsize.labels = c(15, 10),    # Font size for labels at different levels
-        fontcolor.labels = c("black", "black"),  # Font color for labels
-        fontface.labels = c(2, 1),      # Font face for labels
-        bg.labels = "#CCCCCCDC",      # Background color for labels
-        align.labels = list(c("left", "top"), c("center", "center")))
-dev.off()
-system("/home/allie/.iterm2/imgcat postreemap-HEU.pdf")
-# treemap for negative group
-colors <- setNames(neggroup$hexcol, paste(neggroup$Genus, neggroup$Species, sep="_"))
-pdf("negtreemap-HEU.pdf")
-treemap(neggroup,
-        index = c("Genus", "Species"),  # Hierarchical index
-        vSize = "count",                # Size of the rectangles
-        vColor = "hexcol", 
-        type = "color",
-        palette = colors,              # Color palette
-        border.col = "white",           # Border color of the rectangles
-        fontsize.labels = c(15, 10),    # Font size for labels at different levels
-        fontcolor.labels = c("black", "black"),  # Font color for labels
-        fontface.labels = c(2, 1),      # Font face for labels
-        bg.labels = "#CCCCCCDC",      # Background color for labels
-        align.labels = list(c("left", "top"), c("center", "center")))
-dev.off()
-system("/home/allie/.iterm2/imgcat negtreemap-HEU.pdf")
+dfDHEU <- subset(sortdf, log2FoldChange < 0)
+dfHHEU <- subset(sortdf, log2FoldChange > 0)
 ```
 
 HUU
@@ -754,14 +677,14 @@ res <- results(se_star, alpha=0.05)
 res <- res[order(res$padj),]
 paste("number of genes with adjusted p value lower than 0.05: ", sum(res$padj < 0.05, na.rm=TRUE))
 summary(res)
-# [1] "number of genes with adjusted p value lower than 0.05:  108"
+# [1] "number of genes with adjusted p value lower than 0.05:  109"
 
-# out of 1220 with nonzero total read count
+# out of 1207 with nonzero total read count
 # adjusted p-value < 0.05
-# LFC > 0 (up)       : 100, 8.2%
-# LFC < 0 (down)     : 8, 0.66%
-# outliers [1]       : 346, 28%
-# low counts [2]     : 317, 26%
+# LFC > 0 (up)       : 96, 8%
+# LFC < 0 (down)     : 13, 1.1%
+# outliers [1]       : 348, 29%
+# low counts [2]     : 314, 26%
 # (mean count < 6)
 # [1] see 'cooksCutoff' argument of ?results
 # [2] see 'independentFiltering' argument of ?results
@@ -771,14 +694,14 @@ resLFC <- lfcShrink(se_star, coef="tooth_health_H_vs_D", type="apeglm")
 resLFC <- resLFC[order(resLFC$padj),]
 paste("number of genes with adjusted p value lower than 0.05: ", sum(resLFC$padj < 0.05, na.rm=TRUE))
 summary(resLFC)
-# [1] "number of genes with adjusted p value lower than 0.05:  105"
+# [1] "number of genes with adjusted p value lower than 0.05:  96"
 
-# out of 1220 with nonzero total read count
+# out of 1207 with nonzero total read count
 # adjusted p-value < 0.1
-# LFC > 0 (up)       : 129, 11%
-# LFC < 0 (down)     : 8, 0.66%
-# outliers [1]       : 346, 28%
-# low counts [2]     : 260, 21%
+# LFC > 0 (up)       : 131, 11%
+# LFC < 0 (down)     : 14, 1.2%
+# outliers [1]       : 348, 29%
+# low counts [2]     : 248, 21%
 # (mean count < 4)
 # [1] see 'cooksCutoff' argument of ?results
 # [2] see 'independentFiltering' argument of ?results
@@ -857,11 +780,11 @@ tempdf <- res_ord[res_ord$target_gene == TRUE,]
 # sort the dataframe by logfold change
 sortdf <- tempdf[order(tempdf$log2FoldChange),]
 # get top 10 genes for disease
-low10 <- head(sortdf$locus_tag, 10)
+low <- head(sortdf$locus_tag, 5)
 # negative top 10
-top10 <- tail(sortdf$locus_tag, 10)
+top <- tail(sortdf$locus_tag, 5)
 # concatenate
-labgenes <- c(top10, low10)
+labgenes <- c(top, low)
 
 # Create volcano plot
 p <- EnhancedVolcano(res_ord,
@@ -888,48 +811,120 @@ dev.off()
 system("/home/allie/.iterm2/imgcat volcano-HUU.HvD.pdf")
 
 # first need to split our target genes by whether they are more highly expressed in health or disease
-dfneg <- subset(sortdf, log2FoldChange < 0)
-dfpos <- subset(sortdf, log2FoldChange > 0)
-
-# get counts of genus + species
-posgroup <- dfpos %>% group_by(Genus, Species) %>% summarise(count = n(), hexcol = first(color), .groups = 'drop')
-neggroup <- dfneg %>% group_by(Genus, Species) %>% summarise(count = n(), hexcol = first(color), .groups = 'drop')
-
-# create color map for each dataframe
-colors <- setNames(posgroup$hexcol, paste(posgroup$Genus, posgroup$Species, sep="_"))
-
-# create treemap 
-pdf("postreemap-HUU.pdf")
-treemap(posgroup,
-        index = c("Genus", "Species"),  # Hierarchical index
-        vSize = "count",                # Size of the rectangles
-        vColor = "hexcol", 
-        type = "color",
-        palette = colors,              # Color palette
-        border.col = "white",           # Border color of the rectangles
-        fontsize.labels = c(15, 10),    # Font size for labels at different levels
-        fontcolor.labels = c("black", "black"),  # Font color for labels
-        fontface.labels = c(2, 1),      # Font face for labels
-        bg.labels = "#CCCCCCDC",      # Background color for labels
-        align.labels = list(c("left", "top"), c("center", "center")))
-dev.off()
-system("/home/allie/.iterm2/imgcat postreemap-HUU.pdf")
-# treemap for negative group
-colors <- setNames(neggroup$hexcol, paste(neggroup$Genus, neggroup$Species, sep="_"))
-pdf("negtreemap-HUU.pdf")
-treemap(neggroup,
-        index = c("Genus", "Species"),  # Hierarchical index
-        vSize = "count",                # Size of the rectangles
-        vColor = "hexcol", 
-        type = "color",
-        palette = colors,              # Color palette
-        border.col = "white",           # Border color of the rectangles
-        fontsize.labels = c(15, 10),    # Font size for labels at different levels
-        fontcolor.labels = c("black", "black"),  # Font color for labels
-        fontface.labels = c(2, 1),      # Font face for labels
-        bg.labels = "#CCCCCCDC",      # Background color for labels
-        align.labels = list(c("left", "top"), c("center", "center")))
-dev.off()
-system("/home/allie/.iterm2/imgcat negtreemap-HUU.pdf")
+dfDHUU <- subset(sortdf, log2FoldChange < 0)
+dfHHUU <- subset(sortdf, log2FoldChange > 0)
 ```
+
+What about a bubble chart?
+
+```R
+# install.packages("dplyr")
+# install.packages("ggplot2")
+library(dplyr)
+library(ggplot2)
+
+# rename the input dataframes so that you don't have to run all the code above
+dfHall -> all
+dfHHI -> HI
+dfHHEU -> HEU
+dfHHUU -> HUU 
+
+# subset for clarity
+all <- all %>% select('baseMean', 'Genus', 'Species')
+HI <- HI %>% select('baseMean', 'Genus', 'Species')
+HEU <- HEU %>% select('baseMean', 'Genus', 'Species')
+HUU <- HUU %>% select('baseMean', 'Genus', 'Species')
+
+# group and get average base mean
+group_all <- all %>% group_by(Genus, Species) %>% summarise(average_baseMean = mean(baseMean))
+group_HI <- HI %>% group_by(Genus, Species) %>% summarise(average_baseMean = mean(baseMean))
+group_HEU <- HEU %>% group_by(Genus, Species) %>% summarise(average_baseMean = mean(baseMean))
+group_HUU <- HUU %>% group_by(Genus, Species) %>% summarise(average_baseMean = mean(baseMean))
+
+# add source column so you can track them back
+group_all <- group_all %>% mutate(Source = "All")
+group_HI <- group_HI %>% mutate(Source = "HI")
+group_HEU <- group_HEU %>% mutate(Source = "HEU")
+group_HUU <- group_HUU %>% mutate(Source = "HUU")
+
+# merge all into one
+merged <- rbind(group_all, group_HI, group_HEU, group_HUU)
+# add health indicator
+merged <- merged %>% mutate(Condition = "H")
+
+# do the same thing with the disease results
+dfDall -> all
+dfDHI -> HI
+dfDHEU -> HEU
+dfDHUU -> HUU 
+
+# subset for clarity
+all <- all %>% select('baseMean', 'Genus', 'Species')
+HI <- HI %>% select('baseMean', 'Genus', 'Species')
+HEU <- HEU %>% select('baseMean', 'Genus', 'Species')
+HUU <- HUU %>% select('baseMean', 'Genus', 'Species')
+
+# group and get average base mean
+group_all <- all %>% group_by(Genus, Species) %>% summarise(average_baseMean = mean(baseMean))
+group_HI <- HI %>% group_by(Genus, Species) %>% summarise(average_baseMean = mean(baseMean))
+group_HEU <- HEU %>% group_by(Genus, Species) %>% summarise(average_baseMean = mean(baseMean))
+group_HUU <- HUU %>% group_by(Genus, Species) %>% summarise(average_baseMean = mean(baseMean))
+
+# add source column so you can track them back
+group_all <- group_all %>% mutate(Source = "All")
+group_HI <- group_HI %>% mutate(Source = "HI")
+group_HEU <- group_HEU %>% mutate(Source = "HEU")
+group_HUU <- group_HUU %>% mutate(Source = "HUU")
+
+# merge all into one
+merged2 <- rbind(group_all, group_HI, group_HEU, group_HUU)
+# add health indicator
+merged2<- merged2 %>% mutate(Condition = "D")
+# merge them both together!
+df <- rbind(merged, merged2)
+
+# now that the data is formatted properly, can make a bubble plot
+# Count number of species per genus
+species_counts <- df %>%
+  group_by(Genus) %>%
+  summarise(num_species = n_distinct(Species)) %>%
+  arrange(desc(num_species))  # Order by number of species descending
+
+# Reorder Genus based on the number of species in each group
+df$Genus <- factor(df$Genus, levels = species_counts$Genus)
+df$Species <- as.factor(df$Species)
+# Order dataframe based on Genus factor levels
+df <- df[order(df$Genus), ]
+# Create a nested label combining Genus and Species
+df$Species_nested <- paste(df$Genus, df$Species, sep = " - ")
+# get order of nested species
+ordered_species <- rev(unique(df$Species_nested))
+df$Species_nested <- as.factor(df$Species_nested)
+df$Species_nested <- factor(df$Species_nested, levels = ordered_species)
+# set levels of the x axis as well
+df$Source <- factor(df$Source, levels = c("All", "HUU", "HEU", "HI"))
+# and order of grid
+df$Condition <- factor(df$Condition, levels = c("H", "D"))
+
+pdf("HvD_bubble_plot.pdf", width = 10)
+  ggplot(df, aes(x = Source, y = Species_nested, size = average_baseMean, color = Condition)) +
+  geom_point(alpha = 0.7) +
+  scale_size(range = c(3, 10)) +
+  theme_minimal() +
+  labs(
+    x = "Source",
+    y = "Species",
+    size = "Base Mean"
+  ) +
+  facet_grid(. ~ Condition, switch = "y") +
+  scale_color_manual(values = c("#22A146", "#9B002F")) +
+   theme_minimal()
+dev.off()
+system("/home/allie/.iterm2/imgcat HvD_bubble_plot.pdf")
+```
+
+
+
+
+
 
