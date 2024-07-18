@@ -31,6 +31,8 @@ colnames(genecounts) <- gsub(x = names(genecounts), pattern = "\\.operon", repla
 colnames(genecounts) <- gsub(x = colnames(genecounts), pattern = "\\.", replacement = "-") 
 # filter metadata so that we only compare H to D
 submap <- metadata[metadata$tooth_health == "H" | metadata$tooth_health == "D",]
+submap <- arrange(submap, sample_id)
+
 subcount <- genecounts[, colnames(genecounts) %in% row.names(submap)]
 # add pseudocount to avoid errors with size factor estimation
 subcount <- subcount + 1
@@ -59,27 +61,32 @@ res <- results(se_star, alpha=0.05)
 res <- res[order(res$padj),]
 paste("number of genes with adjusted p value lower than 0.05: ", sum(res$padj < 0.05, na.rm=TRUE))
 summary(res)
-# [1] "number of genes with adjusted p value lower than 0.05:  93"
+# # [1] "number of genes with adjusted p value lower than 0.05:  79"
 # out of 6705 with nonzero total read count
 # adjusted p-value < 0.05
-# LFC > 0 (up)       : 61, 0.91%
-# LFC < 0 (down)     : 32, 0.48%
+# LFC > 0 (up)       : 49, 0.73%
+# LFC < 0 (down)     : 30, 0.45%
 # outliers [1]       : 0, 0%
-# low counts [2]     : 6354, 95%
+# low counts [2]     : 6340, 95%
 # (mean count < 1)
+# [1] see 'cooksCutoff' argument of ?results
+# [2] see 'independentFiltering' argument of ?results
 
 # health is positive, dentin cavity negative
 resLFC <- lfcShrink(se_star, coef="tooth_health_H_vs_D", type="apeglm")
 resLFC <- resLFC[order(resLFC$padj),]
 paste("number of genes with adjusted p value lower than 0.05: ", sum(resLFC$padj < 0.05, na.rm=TRUE))
 summary(resLFC)
-# [1] "number of genes with adjusted p value lower than 0.05:  93"
+# # [1] "number of genes with adjusted p value lower than 0.05:  79"
 # out of 6705 with nonzero total read count
 # adjusted p-value < 0.1
-# LFC > 0 (up)       : 71, 1.1%
-# LFC < 0 (down)     : 48, 0.72%
+# LFC > 0 (up)       : 64, 0.95%
+# LFC < 0 (down)     : 46, 0.69%
 # outliers [1]       : 0, 0%
-# low counts [2]     : 6354, 95%
+# low counts [2]     : 6340, 95%
+# (mean count < 1)
+# [1] see 'cooksCutoff' argument of ?results
+# [2] see 'independentFiltering' argument of ?results
 write.table(resLFC, file="deseq_results_operon-HvD.txt", quote=F, sep="\t")
 save.image("deseq_results_operon-HvD.RData")
 ```
@@ -118,7 +125,7 @@ sigdf <- as.data.frame(cbind(sigloc$locus_tag, sigsp))
 siglist <- split(sigdf$V1, sigdf$sigsp)
 
 # remove any lists (i.e., genera) with fewer than three hits
-siglist <- Filter(function(x) length(x) >=3, siglist)
+# siglist <- Filter(function(x) length(x) >=3, siglist)
 
 # create object for each genus
 # remove previously created lists or will mess up
@@ -181,6 +188,11 @@ pdf("volcano-operon-HvD.pdf", width=15, height=10)
 overall_plot
 dev.off()
 system("~/.iterm2/imgcat ./volcano-operon-HvD.pdf")
+#see which ones have all 3 genes diff expressed
+sig_df <- resdf %>% filter(padj <= pval) %>% filter(log2FoldChange >= lfc | log2FoldChange <= -lfc) 
+ureABC_name <- names(which(table(sig_df$SEQ_ID) >= 3))
+names(which(table(sig_df$SEQ_ID) >= 3))
+# character(0)
 ```
 Make beta diversity plot
 ```R
@@ -227,8 +239,8 @@ row <- rows2[, c("seq", "name")]
 rows <- as.data.frame(row[, !(colnames(row) %in% "seq")])
 rownames(rows) <- rows2$seq
 colnames(rows) <- c('name')
-
-x <- pheatmap(topCounts, annotation_col = df, annotation_colors = mat_colors,  color = brewer.pal(9, "Greys"), labels_row = rows)
+row.names(topCounts) <- rows$name
+x <- pheatmap(topCounts, annotation_col = df, annotation_colors = mat_colors,  color = brewer.pal(9, "Greys"),)
 save_pheatmap_pdf(x, "test.pdf")
 system("~/.iterm2/imgcat ./test.pdf")
 ```
@@ -295,7 +307,7 @@ system("~/.iterm2/imgcat ./gene_ure_donut.pdf")
 ure_count <- res_seqs %>% 
   group_by(tooth_health, Species) %>% 
   summarise(Total = sum(norm_Gene, na.rm = TRUE))
-pdf("species_ure_donut.pdf")
+pdf("species_ure_donut.pdf", width =30, height =30)
 PieDonut(ure_count, aes("tooth_health", "Species", count="Total"), showRatioThreshold = F)
 dev.off()
 system("~/.iterm2/imgcat ./species_ure_donut.pdf")
@@ -319,10 +331,26 @@ system("~/.iterm2/imgcat ./hiv_ure_donut.pdf")
 ure_count <- res_seqs %>% 
   group_by(Var2, Species) %>% 
   summarise(Total = sum(norm_Gene, na.rm = TRUE))
-pdf("sample_ure_donut.pdf", width =25, height =25)
+pdf("sample_ure_donut.pdf", width =50, height =50)
 PieDonut(ure_count, aes("Var2", "Species", count="Total"), showRatioThreshold = F)
 dev.off()
 system("~/.iterm2/imgcat ./sample_ure_donut.pdf")
+#find prportion of transcripts that are A. neaslundii
+data_sorted <- ure_count[order(ure_count$Total,
+                                decreasing = TRUE), ]
+ 
+# select top 1 values from each sample
+data_mod <- Reduce(rbind,                                
+                    by(data_sorted,
+                       data_sorted["Var2"],
+                       head,
+                       n = 1))
+ure_count$a_neas <- ifelse(ure_count$Species == "Actinomyces_naeslundii",  "yes", "no")
+ure_count <- ure_count %>% group_by(Var2, a_neas) %>% summarise(reads = sum(Total, na.rm = TRUE))
+total_reads <- ure_count %>% group_by(Var2) %>% summarise(sum = sum(reads, na.rm = TRUE))
+a_count <- ure_count[ure_count$a_neas == 'yes',]
+reads <-inner_join(total_reads, a_count, by = join_by(Var2 ==  Var2))
+reads$pro <- reads$reads/reads$sum
 ```
 # 3. HUU DESeq
 ```R
@@ -357,33 +385,36 @@ res <- results(se_star, alpha=0.05)
 res <- res[order(res$padj),]
 paste("number of genes with adjusted p value lower than 0.05: ", sum(res$padj < 0.05, na.rm=TRUE))
 summary(res)
-# # [1] "number of genes with adjusted p value lower than 0.05:  25"
-# out of 216 with nonzero total read count
+# # [1] "number of genes with adjusted p value lower than 0.05:  27"
+# out of 214 with nonzero total read count
 # adjusted p-value < 0.05
-# LFC > 0 (up)       : 26, 12%
-# LFC < 0 (down)     : 1, 0.46%
-# outliers [1]       : 87, 40%
-# low counts [2]     : 29, 13%
+# LFC > 0 (up)       : 27, 13%
+# LFC < 0 (down)     : 0, 0%
+# outliers [1]       : 88, 41%
+# low counts [2]     : 53, 25%
+# (mean count < 6)
+# [1] see 'cooksCutoff' argument of ?results
+# [2] see 'independentFiltering' argument of ?results
 
 # health is positive, dentin cavity negative
 resLFC <- lfcShrink(se_star, coef="tooth_health_H_vs_D", type="apeglm")
 resLFC <- resLFC[order(resLFC$padj),]
 paste("number of genes with adjusted p value lower than 0.05: ", sum(resLFC$padj < 0.05, na.rm=TRUE))
 summary(resLFC)
-# # [1] "number of genes with adjusted p value lower than 0.05:  26"
-# out of 216 with nonzero total read count
+# # [1] "number of genes with adjusted p value lower than 0.05:  25"
+# out of 214 with nonzero total read count
 # adjusted p-value < 0.1
 # LFC > 0 (up)       : 39, 18%
 # LFC < 0 (down)     : 0, 0%
-# outliers [1]       : 87, 40%
-# low counts [2]     : 42, 19%
+# outliers [1]       : 88, 41%
+# low counts [2]     : 42, 20%
 write.table(resLFC, file="deseq_results_operon-HvD-HUU.txt", quote=F, sep="\t")
 save.image("deseq_results_operon-HvD-HUU.RData")
 ```
 HUU Valcona Plot
 ```R
 # filter by locus tag 
-# load("deseq_results_ure-HvD-HUU.RData")
+load("deseq_results_ure-HvD-HUU.RData")
 resdf <- as.data.frame(resLFC)
 ann <- homd[homd$locus_tag %in% rownames(resdf),]
 
@@ -413,7 +444,7 @@ sigdf <- as.data.frame(cbind(sigloc$locus_tag, sigsp))
 siglist <- split(sigdf$V1, sigdf$sigsp)
 
 # remove any lists (i.e., genera) with fewer than three hits
-siglist <- Filter(function(x) length(x) >=3, siglist)
+# siglist <- Filter(function(x) length(x) >=3, siglist)
 
 # create object for each genus
 # remove previously created lists or will mess up
@@ -464,7 +495,7 @@ HUU_plot <- EnhancedVolcano(res_ord,
 	title = "",
 	subtitle = "",
 	caption = "",
-	labSize = 3,
+	labSize = 2,
 	shape = 19,
 	legendPosition = 'right',
 	boxedLabels = TRUE,
@@ -476,6 +507,11 @@ pdf("volcano-HvD-operon-HUU.pdf", width=15, height=10)
 HUU_plot
 dev.off()
 system("~/.iterm2/imgcat ./volcano-HvD-operon-HUU.pdf")
+#see which ones have all 3 genes diff expressed
+sig_df <- resdf %>% filter(padj <= pval) %>% filter(log2FoldChange >= lfc | log2FoldChange <= -lfc) 
+ureABC_name <- names(which(table(sig_df$SEQ_ID) >= 3))
+names(which(table(sig_df$SEQ_ID) >= 3))
+# [1] "SEQF5153.1" "SEQF5162.1"
 ```
 # 4. HEU DESeq
 ```R
@@ -536,7 +572,7 @@ save.image("deseq_results_operon-HvD-HEU.RData")
 HEU Valcona Plot
 ```R
 # filter by locus tag 
-#load("deseq_results_operon-HvD-HEU.RData")
+load("deseq_results_operon-HvD-HEU.RData")
 resdf <- as.data.frame(resLFC)
 ann <- homd[homd$locus_tag %in% rownames(resdf),]
 
@@ -566,7 +602,7 @@ sigdf <- as.data.frame(cbind(sigloc$locus_tag, sigsp))
 siglist <- split(sigdf$V1, sigdf$sigsp)
 
 # remove any lists (i.e., genera) with fewer than three hits
-siglist <- Filter(function(x) length(x) >=3, siglist)
+# siglist <- Filter(function(x) length(x) >=3, siglist)
 
 # create object for each genus
 # remove previously created lists or will mess up
@@ -629,6 +665,11 @@ pdf("volcano-HvD-operon-HEU.pdf", width=15, height=10)
 HEU_plot
 dev.off()
 system("~/.iterm2/imgcat ./volcano-HvD-operon-HEU.pdf")
+#see which ones have all 3 genes diff expressed
+sig_df <- resdf %>% filter(padj <= pval) %>% filter(log2FoldChange >= lfc | log2FoldChange <= -lfc) 
+ureABC_name <- names(which(table(sig_df$SEQ_ID) >= 3))
+names(which(table(sig_df$SEQ_ID) >= 3))
+# character(0)
 ```
 # 6. HI DESeq
 ```R
@@ -664,12 +705,11 @@ res <- res[order(res$padj),]
 paste("number of genes with adjusted p value lower than 0.05: ", sum(res$padj < 0.05, na.rm=TRUE))
 summary(res)
 # [1] "number of genes with adjusted p value lower than 0.05:  0"
-
-# out of 149 with nonzero total read count
+# out of 187 with nonzero total read count
 # adjusted p-value < 0.05
 # LFC > 0 (up)       : 0, 0%
 # LFC < 0 (down)     : 0, 0%
-# outliers [1]       : 8, 5.4%
+# outliers [1]       : 53, 28%
 # low counts [2]     : 0, 0%
 
 # health is positive, dentin cavity negative
@@ -677,20 +717,19 @@ resLFC <- lfcShrink(se_star, coef="tooth_health_H_vs_D", type="apeglm")
 resLFC <- resLFC[order(resLFC$padj),]
 paste("number of genes with adjusted p value lower than 0.05: ", sum(resLFC$padj < 0.05, na.rm=TRUE))
 summary(resLFC)
-# # [1] "number of genes with adjusted p value lower than 0.05:  0"
-# out of 149 with nonzero total read count
-# adjusted p-value < 0.1
-# LFC > 0 (up)       : 0, 0%
+# # [1] "number of genes with adjusted p value lower than 0.05:  2"
+# # out of 187 with nonzero total read count
+# LFC > 0 (up)       : 12, 6.4%
 # LFC < 0 (down)     : 0, 0%
-# outliers [1]       : 8, 5.4%
-# low counts [2]     : 0, 0%
+# outliers [1]       : 53, 28%
+# low counts [2]     : 114, 61%
 write.table(resLFC, file="deseq_results_operon-HvD-HI.txt", quote=F, sep="\t")
 save.image("deseq_results_operon-HvD-HI.RData")
 ```
 Valcona Plot
 ```R
 # filter by locus tag 
-#load("deseq_results_operon-HvD-HI.RData")
+load("deseq_results_operon-HvD-HI.RData")
 resdf <- as.data.frame(resLFC)
 ann <- homd[homd$locus_tag %in% rownames(resdf),]
 
@@ -720,7 +759,7 @@ sigdf <- as.data.frame(cbind(sigloc$locus_tag, sigsp))
 siglist <- split(sigdf$V1, sigdf$sigsp)
 
 # remove any lists (i.e., genera) with fewer than three hits
-siglist <- Filter(function(x) length(x) >=3, siglist)
+# siglist <- Filter(function(x) length(x) >=3, siglist)
 
 # create object for each genus
 # remove previously created lists or will mess up
@@ -783,6 +822,11 @@ pdf("volcano-HvD-operon-HI.pdf", width=15, height=10)
 HI_plot
 dev.off()
 system("~/.iterm2/imgcat ./volcano-HvD-operon-HI.pdf")
+#see which ones have all 3 genes diff expressed
+sig_df <- resdf %>% filter(padj <= pval) %>% filter(log2FoldChange >= lfc | log2FoldChange <= -lfc) 
+ureABC_name <- names(which(table(sig_df$SEQ_ID) >= 3))
+names(which(table(sig_df$SEQ_ID) >= 3))
+# character(0)
 ```
 # 7. Combine plots
 ```R

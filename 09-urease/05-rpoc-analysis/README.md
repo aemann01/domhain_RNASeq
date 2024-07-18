@@ -64,6 +64,7 @@ ggplot(data)+
   	  legend.text = element_text(size = 7),legend.title = element_text(size = 10))
 dev.off()
 system("~/.iterm2/imgcat ./actino.pdf")
+test <- data %>% group_by(Sample) %>% summarise(average_baseMean = across(c(Abundance)))
 ```
 # 5. Proportion of different H. parainfluenzae
 ```R
@@ -85,5 +86,66 @@ ggplot(data)+
   	  legend.text = element_text(size = 7),legend.title = element_text(size = 10))
 dev.off()
 system("~/.iterm2/imgcat ./h_para.pdf")
+```
+# 6. urease compptent bacteria compared to RNA
+Get the ASVs with bacteia that haveu urease
+```sh
+awk '{print $1}' ../01-operon-identify/ureABC.operon | sed '1d' >seqs 
+parallel -a seqs -j 7 -k  "grep '{}' -w ../../homd_map/ure.annotations.txt" | awk '{print $4, $5}' | sed 's/ /_/' | sort | uniq > ure_taxa
+parallel -a ure_taxa -j 7 -k  "grep '{}' ../../rpoc/taxonomy.txt" | sed 's/\t.*//' > ure_ASVs
+```
+Get ureABC locus tags
+```sh
+cat <(awk '{print $2}' ../01-operon-identify/ureABC.operon | sed '1d') <(awk '{print $3}' ../01-operon-identify/ureABC.operon | sed '1d') <(awk '{print $4}' ../01-operon-identify/ureABC.operon | sed '1d') > ureABC_seqs
+```
+Make plot
+```R
+library(tidyverse)
+library(reshape2)
+setwd("~/rna_dohmain/09-urease/05-rpoc-analysis")
+seqtab_rna <- read.table("~/rna_dohmain/homd_map/read_counts.txt", header=T, row.names=1)
+seqtab_rpoc <- read.table("~/rna_dohmain/rpoc/sequence_table.merged.txt", header=T, row.names=1)
 
+seqtab_rpoc$sample <- row.names(seqtab_rpoc)
+rpoc_df <- melt(as.data.frame(seqtab_rpoc))
+
+seqtab_rna$SEQ <- row.names(seqtab_rna)
+rna_df <- melt(seqtab_rna)
+
+ure_taxa <- as.character(read.table("ure_ASVs", header = FALSE)$V1)
+ure_seqs <- as.character(read.table("ureABC_seqs", header = FALSE)$V1)
+
+# Annotating urease presence in rpoc_df
+rpoc_df$ure_comp <- ifelse(rpoc_df$variable %in% ure_taxa, "yes", "no")
+rpoc_pres <- rpoc_df %>% group_by(sample, ure_comp) %>% summarise(across(c(value), sum))
+
+# Annotating urease presence in rna
+rna_df$ure_comp <- ifelse(rna_df$SEQ %in% rna_df, "yes", "no")
+rna_pres <- rna_df %>% group_by(sample, ure_comp) %>% summarise(across(c(value), sum))
+save.image("test.RData")
+```
+# 7. See if A. naeslundii is picked uo by primers
+```sh
+wget https://github.com/egonozer/in_silico_pcr/raw/master/in_silico_PCR.pl
+grep -w 1655 ~/rna_dohmain/rpoc/database/rpoc_ref.fa -A 1 > a_naeslundii.fa
+
+perl in_silico_PCR.pl -s ~/rna_dohmain/rpoc/database/rpoc_ref.fa -a MAYGARAARMGNATGYTNCARGA -b GMCATYTGRTCNCCRTCRAA > results.txt 2> amplicons.fasta
+
+perl in_silico_PCR.pl -s a_naeslundii.fa -a MAYGARAARMGNATGYTNCARGA -b GMCATYTGRTCNCCRTCRAA > results.txt 2> amplicons.fasta
+
+#make a tree
+grep Actinomyces -w ../../rpoc/taxonomy_bac.txt | awk '{print $1}' | while read line; 
+seqtk subseq ../../rpoc/rep_set.fa <(grep Actinomyces -w ../../rpoc/taxonomy_bac.txt | awk '{print $1}') > actinomyces.fa
+#trime out primers from amplicon
+cutadapt -g MAYGARAARMGNATGYTNCARGA -o front_trim.fasta amplicons.fasta
+cutadapt -l 478 -o trimmed_amplicon.fasta amplicons.fasta
+
+cat actinomyces.fa trimmed_amplicon.fasta > tmp
+mv tmp actinomyces.fa
+mafft --thread 7 actinomyces.fa > actinomyces.align.fa
+
+raxmlHPC-PTHREADS-SSE3 -T 7 -m GTRCAT -c 25 -e 0.001 -p 31514 -f a -N 100 -x 02938 -n actino.tre -s actinomyces.align.fa
+
+grep Actinomyces -w ../../rpoc/taxonomy_bac.txt | awk '{print $1, $8}' | sed 's/ /\t/' > actino_annots.txt
+awk '{print $1,$2}' results.txt | sed '1d' | sed 's/ /\t/' >> actino_annots.txt
 ```

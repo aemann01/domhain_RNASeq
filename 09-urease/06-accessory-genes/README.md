@@ -83,37 +83,30 @@ res <- results(se_star, alpha=0.05)
 res <- res[order(res$padj),]
 paste("number of genes with adjusted p value lower than 0.05: ", sum(res$padj < 0.05, na.rm=TRUE))
 summary(res)
-# [1] "number of genes with adjusted p value lower than 0.05:  118"
+# [1] "number of genes with adjusted p value lower than 0.05:  110"
 # out of 7938 with nonzero total read count
 # adjusted p-value < 0.05
-# LFC > 0 (up)       : 82, 1%
-# LFC < 0 (down)     : 36, 0.45%
+# LFC > 0 (up)       : 72, 0.91%
+# LFC < 0 (down)     : 38, 0.48%
 # outliers [1]       : 0, 0%
-# low counts [2]     : 7521, 95%
-# (mean count < 1)
-# [1] see 'cooksCutoff' argument of ?results
-# [2] see 'independentFiltering' argument of ?results
-# health is positive, dentin cavity negative
+# low counts [2]     : 7513, 95%
 resLFC <- lfcShrink(se_star, coef="tooth_health_H_vs_D", type="apeglm")
 resLFC <- resLFC[order(resLFC$padj),]
 paste("number of genes with adjusted p value lower than 0.05: ", sum(resLFC$padj < 0.05, na.rm=TRUE))
 summary(resLFC)
-# # [1] "number of genes with adjusted p value lower than 0.05:  118"
+# # [1] "number of genes with adjusted p value lower than 0.05:  110"
 # out of 7938 with nonzero total read count
 # adjusted p-value < 0.1
-# LFC > 0 (up)       : 72, 0.91%
-# LFC < 0 (down)     : 68, 0.86%
+# LFC > 0 (up)       : 64, 0.81%
+# LFC < 0 (down)     : 73, 0.92%
 # outliers [1]       : 0, 0%
-# low counts [2]     : 7521, 95%
-# (mean count < 1)
-# [1] see 'cooksCutoff' argument of ?results
-# [2] see 'independentFiltering' argument of ?result
+# low counts [2]     : 7513, 95%
 write.table(resLFC, file="deseq_results_ure_acces-HvD.txt", quote=F, sep="\t")
 save.image("deseq_results_ure_acces-HvD.RData")
 ```
 Valcona Plot
 ```R
-load("deseq_results_ure_acces-HvD.RData")
+# load("deseq_results_ure_acces-HvD.RData")
 # add in annotations
 homd <- read.table("./ureDEFG.annotations.txt", header=T, sep="\t", quote="")
 # filter by locus tag 
@@ -214,4 +207,5 @@ system("~/.iterm2/imgcat ./volcano-HvD.pdf")
 sig_df <- resdf %>% filter(padj <= pval) %>% filter(log2FoldChange >= lfc | log2FoldChange <= -lfc) 
 ureDEFG_name <- names(which(table(sig_df$SEQ_ID) >= 4))
 names(which(table(sig_df$SEQ_ID) >= 3))
+# [1] "SEQF5162.1" "SEQF5164.1" "SEQF5170.1"
 ```
