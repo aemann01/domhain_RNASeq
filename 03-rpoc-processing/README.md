@@ -310,3 +310,27 @@ raxmlHPC-PTHREADS-SSE3 -T 7 -m GTRCAT -c 25 -e 0.001 -p 31514 -f a -N 100 -x 029
 # 24. Find the sequence id the kraken2 datbase matched to
 ```sh
 sed 's/|.*//' lineages | while read line; do grep -c $line ./database/rpoc_ref.fa; done > seqs
+```
+# 25. Try assigning unassigned ASVs to NT database
+```sh
+scp rep_set.unclassified.out scrull@slogin.palmetto.clemson.edu:/scratch/scrull/hiv_rnaseq/rpoc/rep_set.unclassified.homd
+
+#!/bin/bash
+
+#SBATCH --job-name unassigned_nt_taxonomy
+#SBATCH --nodes 1
+#SBATCH --tasks-per-node 3
+#SBATCH --cpus-per-task 1
+#SBATCH --mem 950gb
+#SBATCH --time 48:00:00
+#SBATCH --constraint interconnect_fdr
+#SBATCH --output=%x.%j.out
+#SBATCH --error=%x.%j.err
+
+cd /scratch/scrull/hiv_rnaseq/rpoc
+module add kraken2/2.1.2
+kraken2 --db ../denovo-taxonomy/nt_kraken \
+  --threads 7 \
+  --use-names \
+  --output rep_set.homd.unassigned rep_set.unclassified.homd \
+  --unclassified-out rep_set.unclassified.nt --confidence 0.01
