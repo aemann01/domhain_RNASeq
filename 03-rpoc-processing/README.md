@@ -236,11 +236,15 @@ wget https://ftp.ncbi.nlm.nih.gov/pub/taxonomy/new_taxdump/new_taxdump.tar.gz
 tar -xvzf new_taxdump.tar.gz
 cd ../
 #taxonomic assignment
-kraken2 --db ~/databases/kraken_homd \
+kraken2 --db ./database/kraken_homd \
 	--threads 6 \
 	--use-names \
 	--output rep_set.kraken.out rep_set.fa \
 	--unclassified-out rep_set.unclassified.out --confidence 0.01
+# 	Loading database information... done.
+# 8437 sequences (4.03 Mbp) processed in 0.268s (1886.7 Kseq/m, 902.22 Mbp/m).
+#   8066 sequences classified (95.60%)
+#   371 sequences unclassified (4.40%)
 ```
 # 19. Get full taxonomy
 ```sh
@@ -301,8 +305,32 @@ module add raxml/8.2.12
 # move into scratch
 cd /scratch/scrull/hiv_rnaseq/rpoc
 
-raxmlHPC-PTHREADS-SSE3 -T 70 -m GTRCAT -c 25 -e 0.001 -p 31514 -f a -N 100 -x 02938 -n ref.tre -s rep_set.align.fa
+raxmlHPC-PTHREADS-SSE3 -T 7 -m GTRCAT -c 25 -e 0.001 -p 31514 -f a -N 100 -x 02938 -n ref.tre -s rep_set.align.fa
 ```
 # 24. Find the sequence id the kraken2 datbase matched to
 ```sh
 sed 's/|.*//' lineages | while read line; do grep -c $line ./database/rpoc_ref.fa; done > seqs
+```
+# 25. Try assigning unassigned ASVs to NT database
+```sh
+scp rep_set.unclassified.out scrull@slogin.palmetto.clemson.edu:/scratch/scrull/hiv_rnaseq/rpoc/rep_set.unclassified.homd
+
+#!/bin/bash
+
+#SBATCH --job-name unassigned_nt_taxonomy
+#SBATCH --nodes 1
+#SBATCH --tasks-per-node 3
+#SBATCH --cpus-per-task 1
+#SBATCH --mem 950gb
+#SBATCH --time 48:00:00
+#SBATCH --constraint interconnect_fdr
+#SBATCH --output=%x.%j.out
+#SBATCH --error=%x.%j.err
+
+cd /scratch/scrull/hiv_rnaseq/rpoc
+module add kraken2/2.1.2
+kraken2 --db ../denovo-taxonomy/nt_kraken \
+  --threads 7 \
+  --use-names \
+  --output rep_set.homd.unassigned rep_set.unclassified.homd \
+  --unclassified-out rep_set.unclassified.nt --confidence 0.01

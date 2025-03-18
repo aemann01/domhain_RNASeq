@@ -1,19 +1,18 @@
 # 1. Subset the readcount file
 ```sh
 #ureA
-awk '{print $2}' ../01-operon-identify/ureABC.operon | sed '1d' > ureA.seqs
-cat ureA.seqs | while read line;do grep True ../01-operon-identify/ureA.comb | grep $line; done | awk '{print $6}' >> ureA.seqs
+awk '{print $2}' ../07-denovo-operon/ureABC.operon | sed '1d' > ureA.seqs
 #ureB
-awk '{print $3}' ../01-operon-identify/ureABC.operon | sed '1d'> ureB.seqs
-cat ureB.seqs | while read line;do grep True ../01-operon-identify/ureB.comb | grep $line; done | awk '{print $6}' >> ureB.seqs
+awk '{print $3}' ../07-denovo-operon/ureABC.operon | sed '1d'> ureB.seqs
+cat ureB.seqs | while read line;do grep True ../07-denovo-operon/ureB.comb | grep $line; done | awk '{print $6}' >> ureB.seqs
 #ureC
-awk '{print $4}' ../01-operon-identify/ureABC.operon | sed '1d'> ureC.seqs
-cat ureC.seqs | while read line;do grep True ../01-operon-identify/ureC.comb | grep $line; done | awk '{print $6}' >> ureC.seqs
-cat ureC.seqs | while read line;do grep True ../01-operon-identify/ureC.comb2 | grep $line; done | awk '{print $6}' >> ureC.seqs
+awk '{print $4}' ../07-denovo-operon/ureABC.operon | sed '1d'> ureC.seqs
+
 cat ureA.seqs ureB.seqs ureC.seqs > ureABC.seqs
 sed -i '1 i\Geneid' ureABC.seqs
+sed -i 's/.*_C/C/' ureABC.seqs
 #make the file from the HOMD database
-parallel -a ureABC.seqs -j 7 -k "grep '{}' ../../homd_map/read_counts.txt"> ureABC_counts.txt
+parallel -a ureABC.seqs -j 7 -k "grep -w '{}' ../../denovo/read_counts.txt"> ureABC_counts.txt
 
 ```
 # 2. Install packages
@@ -31,9 +30,8 @@ library(EnhancedVolcano)
 library(dplyr)
 library(viridis)
 
-
 #load data
-setwd("~/rna_dohmain/09-urease/03-diff-abundance")
+setwd("~/rna_dohmain/09-urease/08-denovo-deseq")
 metadata <- read.table("~/rna_dohmain/homd_map/map.txt", header=T, sep="\t")
 # remove dashes from health categories or it will mess up downstream processing
 metadata$aliquot_type <- sub("-", "", metadata$aliquot_type)
@@ -74,41 +72,35 @@ res <- results(se_star, alpha=0.05)
 res <- res[order(res$padj),]
 paste("number of genes with adjusted p value lower than 0.05: ", sum(res$padj < 0.05, na.rm=TRUE))
 summary(res)
-# [1] "number of genes with adjusted p value lower than 0.05:  83"
-
-# out of 6726 with nonzero total read count
+# [1] "number of genes with adjusted p value lower than 0.05:  41"
+# out of 244 with nonzero total read count
 # adjusted p-value < 0.05
-# LFC > 0 (up)       : 57, 0.85%
-# LFC < 0 (down)     : 26, 0.39%
+# LFC > 0 (up)       : 23, 9.4%
+# LFC < 0 (down)     : 18, 7.4%
 # outliers [1]       : 0, 0%
-# low counts [2]     : 6372, 95%
-# (mean count < 1)
-# [1] see 'cooksCutoff' argument of ?results
-# [2] see 'independentFiltering' argument of ?results
-
+# low counts [2]     : 28, 11%
+# (mean count < 2)
 # health is positive, dentin cavity negative
 resLFC <- lfcShrink(se_star, coef="tooth_health_H_vs_D", type="apeglm")
 resLFC <- resLFC[order(resLFC$padj),]
 paste("number of genes with adjusted p value lower than 0.05: ", sum(resLFC$padj < 0.05, na.rm=TRUE))
 summary(resLFC)
-# [1] "number of genes with adjusted p value lower than 0.05:  83"
-# out of 6726 with nonzero total read count
+#  [1] "number of genes with adjusted p value lower than 0.05:  41"
+# out of 244 with nonzero total read count
 # adjusted p-value < 0.1
-# LFC > 0 (up)       : 61, 0.91%
-# LFC < 0 (down)     : 38, 0.56%
+# LFC > 0 (up)       : 23, 9.4%
+# LFC < 0 (down)     : 23, 9.4%
 # outliers [1]       : 0, 0%
-# low counts [2]     : 6372, 95%
-# (mean count < 1)
-# [1] see 'cooksCutoff' argument of ?results
-# [2] see 'independentFiltering' argument of ?results
+# low counts [2]     : 33, 14%
+# (mean count < 2)
 write.table(resLFC, file="deseq_results_ure-HvD.txt", quote=F, sep="\t")
 save.image("deseq_results_ure-HvD.RData")
 ```
 Valcona Plot
 ```R
-load("deseq_results_ure-HvD.RData")
+# load("deseq_results_ure-HvD.RData")
 # add in annotations
-homd <- read.table("~/rna_dohmain/homd_map/annotations.merge.txt", header=T, sep="\t", quote="")
+homd <- read.table("~/rna_dohmain/denovo/annotations.denovo.txt", header=T, sep="\t", quote="")
 # filter by locus tag 
 resdf <- as.data.frame(resLFC)
 ann <- homd[homd$locus_tag %in% rownames(resdf),]
@@ -169,15 +161,15 @@ for (i in seq_along(siglist)){
 # add to dataframe
 res_ord$color <- genus_to_color[rownames(res_ord)]
 # if no color, remove genus label
-res_ord$Genus[is.na(res_ord$color)] <- NA
+res_ord$genus[is.na(res_ord$color)] <- NA
 # change NA genus to grey
 res_ord$color[is.na(res_ord$color)] <- "#808080"
 
 # get key value pairs for plotting
-colormap <- setNames(res_ord$color, res_ord$Genus)
+colormap <- setNames(res_ord$color, res_ord$genus)
 
 #combine species and gene
-res_ord$GeneInfo <- paste(res_ord$Species,res_ord$gene)
+res_ord$GeneInfo <- paste(res_ord$species,res_ord$gene)
 
 #Create volcano plot
 overall_plot <- EnhancedVolcano(res_ord,
@@ -236,37 +228,35 @@ res <- results(se_star, alpha=0.05)
 res <- res[order(res$padj),]
 paste("number of genes with adjusted p value lower than 0.05: ", sum(res$padj < 0.05, na.rm=TRUE))
 summary(res)
-# [1] "number of genes with adjusted p value lower than 0.05:  26"
-
-# out of 214 with nonzero total read count
+# [1] "number of genes with adjusted p value lower than 0.05:  27"
+# out of 193 with nonzero total read count
 # adjusted p-value < 0.05
-# LFC > 0 (up)       : 26, 12%
-# LFC < 0 (down)     : 0, 0%
-# outliers [1]       : 86, 40%
-# low counts [2]     : 58, 27%
+# LFC > 0 (up)       : 11, 5.7%
+# LFC < 0 (down)     : 16, 8.3%
+# outliers [1]       : 85, 44%
+# low counts [2]     : 13, 6.7%
+# (mean count < 3)
 
 # health is positive, dentin cavity negative
 resLFC <- lfcShrink(se_star, coef="tooth_health_H_vs_D", type="apeglm")
 resLFC <- resLFC[order(resLFC$padj),]
 paste("number of genes with adjusted p value lower than 0.05: ", sum(resLFC$padj < 0.05, na.rm=TRUE))
 summary(resLFC)
-# [1] "number of genes with adjusted p value lower than 0.05:  25"
-# out of 214 with nonzero total read count
+# [1] "number of genes with adjusted p value lower than 0.05:  23"
+# # out of 193 with nonzero total read count
 # adjusted p-value < 0.1
-# LFC > 0 (up)       : 35, 16%
-# LFC < 0 (down)     : 0, 0%
-# outliers [1]       : 86, 40%
-# low counts [2]     : 49, 23%
-# (mean count < 5)
-# [1] see 'cooksCutoff' argument of ?results
-# [2] see 'independentFiltering' argument of ?results
+# LFC > 0 (up)       : 19, 9.8%
+# LFC < 0 (down)     : 21, 11%
+# outliers [1]       : 85, 44%
+# low counts [2]     : 4, 2.1%
+# (mean count < 2)
 write.table(resLFC, file="deseq_results_ure-HvD-HUU.txt", quote=F, sep="\t")
 save.image("deseq_results_ure-HvD-HUU.RData")
 ```
 HUU Valcona Plot
 ```R
 # filter by locus tag 
-load("deseq_results_ure-HvD-HUU.RData")
+# load("deseq_results_ure-HvD-HUU.RData")
 resdf <- as.data.frame(resLFC)
 ann <- homd[homd$locus_tag %in% rownames(resdf),]
 
@@ -326,15 +316,15 @@ for (i in seq_along(siglist)){
 # add to dataframe
 res_ord$color <- genus_to_color[rownames(res_ord)]
 # if no color, remove genus label
-res_ord$Genus[is.na(res_ord$color)] <- NA
+res_ord$genus[is.na(res_ord$color)] <- NA
 # change NA genus to grey
 res_ord$color[is.na(res_ord$color)] <- "#808080"
 
 # get key value pairs for plotting
-colormap <- setNames(res_ord$color, res_ord$Genus)
+colormap <- setNames(res_ord$color, res_ord$genus)
 
 #combine species and gene
-res_ord$GeneInfo <- paste(res_ord$Species,res_ord$gene)
+res_ord$GeneInfo <- paste(res_ord$species,res_ord$gene)
 
 #Create volcano plot
 HUU_plot <- EnhancedVolcano(res_ord,
@@ -393,34 +383,34 @@ res <- results(se_star, alpha=0.05)
 res <- res[order(res$padj),]
 paste("number of genes with adjusted p value lower than 0.05: ", sum(res$padj < 0.05, na.rm=TRUE))
 summary(res)
-# [1] "number of genes with adjusted p value lower than 0.05:  27"
-
-# out of 260 with nonzero total read count
+# [1] "number of genes with adjusted p value lower than 0.05:  14"
+# out of 207 with nonzero total read count
 # adjusted p-value < 0.05
-# LFC > 0 (up)       : 15, 5.8%
-# LFC < 0 (down)     : 12, 4.6%
-# outliers [1]       : 86, 33%
-# low counts [2]     : 71, 27%
-
+# LFC > 0 (up)       : 9, 4.3%
+# LFC < 0 (down)     : 5, 2.4%
+# outliers [1]       : 52, 25%
+# low counts [2]     : 0, 0%
+# (mean count < 2)
 # health is positive, dentin cavity negative
 resLFC <- lfcShrink(se_star, coef="tooth_health_H_vs_D", type="apeglm")
 resLFC <- resLFC[order(resLFC$padj),]
 paste("number of genes with adjusted p value lower than 0.05: ", sum(resLFC$padj < 0.05, na.rm=TRUE))
 summary(resLFC)
-# [1] "number of genes with adjusted p value lower than 0.05:  27"
-# out of 260 with nonzero total read count
+# [1] "number of genes with adjusted p value lower than 0.05:  14"
+# out of 207 with nonzero total read count
 # adjusted p-value < 0.1
-# LFC > 0 (up)       : 20, 7.7%
-# LFC < 0 (down)     : 10, 3.8%
-# outliers [1]       : 86, 33%
-# low counts [2]     : 71, 27%
+# LFC > 0 (up)       : 24, 12%
+# LFC < 0 (down)     : 5, 2.4%
+# outliers [1]       : 52, 25%
+# low counts [2]     : 4, 1.9%
+# (mean count < 2)
 write.table(resLFC, file="deseq_results_ure-HvD-HEU.txt", quote=F, sep="\t")
 save.image("deseq_results_ure-HvD-HEU.RData")
 ```
 HEU Valcona Plot
 ```R
 # filter by locus tag 
-load("deseq_results_ure-HvD-HEU.RData")
+# load("deseq_results_ure-HvD-HEU.RData")
 resdf <- as.data.frame(resLFC)
 ann <- homd[homd$locus_tag %in% rownames(resdf),]
 
@@ -485,10 +475,10 @@ res_ord$Genus[is.na(res_ord$color)] <- NA
 res_ord$color[is.na(res_ord$color)] <- "#808080"
 
 # get key value pairs for plotting
-colormap <- setNames(res_ord$color, res_ord$Genus)
+colormap <- setNames(res_ord$color, res_ord$genus)
 
 #combine species and gene
-res_ord$GeneInfo <- paste(res_ord$Species,res_ord$gene)
+res_ord$GeneInfo <- paste(res_ord$species,res_ord$gene)
 
 #Create volcano plot
 HEU_plot <- EnhancedVolcano(res_ord,
@@ -547,34 +537,36 @@ res <- results(se_star, alpha=0.05)
 res <- res[order(res$padj),]
 paste("number of genes with adjusted p value lower than 0.05: ", sum(res$padj < 0.05, na.rm=TRUE))
 summary(res)
-# [1] "number of genes with adjusted p value lower than 0.05:  9"
+# [1] "number of genes with adjusted p value lower than 0.05:  7"
 
-# out of 149 with nonzero total read count
+# out of 200 with nonzero total read count
 # adjusted p-value < 0.05
-# LFC > 0 (up)       : 0, 0%
-# LFC < 0 (down)     : 0, 0%
-# outliers [1]       : 8, 5.4%
+# LFC > 0 (up)       : 4, 2%
+# LFC < 0 (down)     : 3, 1.5%
+# outliers [1]       : 66, 33%
 # low counts [2]     : 0, 0%
+# (mean count < 1)
 
 # health is positive, dentin cavity negative
 resLFC <- lfcShrink(se_star, coef="tooth_health_H_vs_D", type="apeglm")
 resLFC <- resLFC[order(resLFC$padj),]
 paste("number of genes with adjusted p value lower than 0.05: ", sum(resLFC$padj < 0.05, na.rm=TRUE))
 summary(resLFC)
-# # [1] "number of genes with adjusted p value lower than 0.05:  0"
-# out of 149 with nonzero total read count
+# # [1] "number of genes with adjusted p value lower than 0.05:  7"
+# out of 200 with nonzero total read count
 # adjusted p-value < 0.1
-# LFC > 0 (up)       : 0, 0%
-# LFC < 0 (down)     : 0, 0%
-# outliers [1]       : 8, 5.4%
+# LFC > 0 (up)       : 4, 2%
+# LFC < 0 (down)     : 5, 2.5%
+# outliers [1]       : 66, 33%
 # low counts [2]     : 0, 0%
+# (mean count < 1)
 write.table(resLFC, file="deseq_results_ure-HvD-HI.txt", quote=F, sep="\t")
 save.image("deseq_results_ure-HvD-HI.RData")
 ```
 Valcona Plot
 ```R
 # filter by locus tag 
-load("deseq_results_ure-HvD-HI.RData")
+# load("deseq_results_ure-HvD-HI.RData")
 resdf <- as.data.frame(resLFC)
 ann <- homd[homd$locus_tag %in% rownames(resdf),]
 
@@ -634,15 +626,15 @@ for (i in seq_along(siglist)){
 # add to dataframe
 res_ord$color <- genus_to_color[rownames(res_ord)]
 # if no color, remove genus label
-res_ord$Genus[is.na(res_ord$color)] <- NA
+res_ord$genus[is.na(res_ord$color)] <- NA
 # change NA genus to grey
 res_ord$color[is.na(res_ord$color)] <- "#808080"
 
 # get key value pairs for plotting
-colormap <- setNames(res_ord$color, res_ord$Genus)
+colormap <- setNames(res_ord$color, res_ord$genus)
 
 #combine species and gene
-res_ord$GeneInfo <- paste(res_ord$Species,res_ord$gene)
+res_ord$GeneInfo <- paste(res_ord$species,res_ord$gene)
 
 #Create volcano plot
 HI_plot <- EnhancedVolcano(res_ord,
