@@ -69,7 +69,7 @@ ann <- ann[sortrow, , drop=FALSE]
 table(rownames(count.twice)==rownames(ann)) # should all return true
 # if all are true, merge together
 count.twice <- cbind(count.twice, ann)
-# get list of Genera to pull from rpoC data later
+# get list of genera to pull from rpoC data later
 count.twice.gen <- unique(count.twice$Genus)
 
 # collapse by genus and sum across rows
@@ -102,7 +102,7 @@ gencols <- c(Actinomyces = "#F66140",
 			Kingella = "#1FCAD4", 
 			Leptotrichia = "#97002E", 
 			Streptococcus = "#16AA48", 
-			Treponema = "#F658F8", 
+			Treponema = "#0C5B6F", 
 			Other = "#838383")
 # long format
 collapsed_long <- collapsed %>%
@@ -184,13 +184,6 @@ collapsed <- subset(collapsed, select = -total)
 ### 8. Create stacked histograms for each sample colored by genus
 
 ```R
-# set color palette
-gencols <- c(Actinomyces = "#F66140", 
-			Kingella = "#1FCAD4", 
-			Leptotrichia = "#97002E", 
-			Streptococcus = "#16AA48", 
-			Treponema = "#F658F8", 
-			Other = "#838383")
 # long format
 collapsed_long <- collapsed %>%
   pivot_longer(cols = -Genus, names_to = "sample", values_to = "count")
@@ -233,8 +226,8 @@ map <- read.table("~/domhain_RNAseq/map.txt", header=T, sep="\t")
 map$aliquot_type <- sub("-", "", map$aliquot_type)
 row.names(map) <- map$sample_id
 # sequence table
-seqtab <- read.table("~/domhain_RNAseq/homd_rpoc_suzanne-7.2.24/sequence_table.merged.txt", header=T, sep="\t", row.names=1)
-tax <- read.table("~/domhain_RNAseq/homd_rpoc_suzanne-7.2.24/taxonomy_bac.txt", header=F, row.names=1, sep="\t")
+seqtab <- read.table("~/domhain_RNAseq/11-rpoc_processing/sequence_table.merged.txt", header=T, sep="\t", row.names=1)
+tax <- read.table("~/domhain_RNAseq/11-rpoc_processing/taxonomy_bac.txt", header=F, row.names=1, sep="\t")
 notinmeta <- setdiff(row.names(seqtab), row.names(map))
 notinraw <- setdiff(row.names(map), row.names(seqtab))
 print("Samples found in ASV table but not in metadata:")
@@ -245,10 +238,26 @@ notinraw
 ps.dat <- phyloseq(otu_table(seqtab, taxa_are_rows=F), sample_data(map), tax_table(as.matrix(tax)))
 ps.dat
 
-# first need to filter our dataframe by genera of interest (going off of RNA seq data)
+# # generate a quick rarefaction curve plot for supplementary figures
+# library(ranacapa)
+# rarefaction_plot <- ggrare(
+#     physeq = ps.dat,  # Replace with your phyloseq object
+#     step = 100,                     # Step size for rarefaction
+#     color = "hiv_status",           # Grouping variable (metadata column)
+#     se = TRUE                      # Include standard error
+# ) +
+#     theme_bw() +
+#     labs(title = "Rarefaction Curve", x = "Sequencing Depth", y = "Observed ASVs")
+# pdf("rarefaction_plot.pdf")
+# rarefaction_plot
+# dev.off()
+# system("/home/allie/.iterm2/imgcat rarefaction_plot.pdf")
+
+# first need to filter our dataframe by species of interest (going off of RNA seq data)
 filter_gen <- unique(c(count.twice.gen, count.triple.gen))
-# filter genera of interest at the V8 level
-ps.dat.filt <- prune_taxa(tax_table(ps.dat)[, "V7"] %in% filter_gen, ps.dat)
+
+# Filter phyloseq object
+ps.dat.filt <- subset_taxa(ps.dat, V8 %in% filter_gen)
 ps.dat.filt 
 ```
 
@@ -259,7 +268,7 @@ ps.dat.filt
 ps.dat.twice <- prune_samples(twice, ps.dat.filt)
 ps.dat.twice
 # aggregate counts by genus
-ps.dat.gen <- tax_glom(ps.dat.twice, taxrank = "V7")
+ps.dat.gen <- tax_glom(ps.dat.twice, taxrank = "V8")
 # extract ASV table
 asvtab <- as.data.frame(otu_table(ps.dat.gen))
 asvtab <- t(asvtab)
@@ -270,7 +279,7 @@ tax_table <- as.data.frame(tax_table(ps.dat.gen))
 # check that locus tags match between the two dataframes
 table(rownames(tax_table)==rownames(asvtab)) # should return all true
 # if all are true, merge together
-asvtab <- cbind(asvtab, tax_table$V7)
+asvtab <- cbind(asvtab, tax_table$V8)
 asvtab <- as.data.frame(asvtab)
 # convert all but last column to numeric
 asvtab <- asvtab %>%
@@ -297,7 +306,7 @@ gencols <- c(Actinomyces = "#F66140",
 			Kingella = "#1FCAD4", 
 			Leptotrichia = "#97002E", 
 			Streptococcus = "#16AA48", 
-			Treponema = "#F658F8", 
+			Treponema = "#0C5B6F", 
 			Other = "#838383")
 
 # long format
@@ -342,7 +351,7 @@ system("/home/allie/.iterm2/imgcat rpoC_log10_ADS_200days.pdf")
 ps.dat.triple <- prune_samples(triple, ps.dat.filt)
 ps.dat.triple
 # aggregate counts by genus
-ps.dat.gen <- tax_glom(ps.dat.triple, taxrank = "V7")
+ps.dat.gen <- tax_glom(ps.dat.triple, taxrank = "V8")
 # extract ASV table
 asvtab <- as.data.frame(otu_table(ps.dat.gen))
 asvtab <- t(asvtab)
@@ -353,7 +362,7 @@ tax_table <- as.data.frame(tax_table(ps.dat.gen))
 # check that locus tags match between the two dataframes
 table(rownames(tax_table)==rownames(asvtab)) # should return all true
 # if all are true, merge together
-asvtab <- cbind(asvtab, tax_table$V7)
+asvtab <- cbind(asvtab, tax_table$V8)
 asvtab <- as.data.frame(asvtab)
 # convert all but last column to numeric
 asvtab <- asvtab %>%
@@ -380,7 +389,7 @@ gencols <- c(Actinomyces = "#F66140",
 			Kingella = "#1FCAD4", 
 			Leptotrichia = "#97002E", 
 			Streptococcus = "#16AA48", 
-			Treponema = "#F658F8", 
+			Treponema = "#0C5B6F", 
 			Other = "#838383")
 
 # long format

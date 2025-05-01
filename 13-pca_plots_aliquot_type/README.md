@@ -3,7 +3,7 @@
 ### 1. Load environment
 
 ```bash
-cd /home/allie/domhain_RNAseq/08-pca_plots_aliquot_type
+cd ~/domhain_RNAseq/08-pca_plots_aliquot_type
 conda activate 2024-HIV_RNASeq
 ```
 
