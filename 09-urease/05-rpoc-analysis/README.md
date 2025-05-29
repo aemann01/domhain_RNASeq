@@ -124,7 +124,7 @@ rna_df$ure_comp <- ifelse(rna_df$SEQ %in% rna_df, "yes", "no")
 rna_pres <- rna_df %>% group_by(sample, ure_comp) %>% summarise(across(c(value), sum))
 save.image("test.RData")
 ```
-# 7. See if A. naeslundii is picked uo by primers
+# 7. See if A. naeslundii is picked up by primers
 ```sh
 wget https://github.com/egonozer/in_silico_pcr/raw/master/in_silico_PCR.pl
 grep -w 1655 ~/rna_dohmain/rpoc/database/rpoc_ref.fa -A 1 > a_naeslundii.fa
