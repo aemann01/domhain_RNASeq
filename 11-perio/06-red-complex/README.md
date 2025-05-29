@@ -652,6 +652,7 @@ summary(resLFC)
 # outliers [1]       : 0, 0%
 # low counts [2]     : 8755, 39%
 # (mean count < 1)write.table(resLFC, file="deseq_results_red-HIvHUU.txt", quote=F, sep="\t")
+write.table(resLFC, file="deseq_results_red-HIvHUU.txt", quote=F, sep="\t")
 save.image("deseq_results_red-HIvHUU.RData")
 ```
 Valcona Plot

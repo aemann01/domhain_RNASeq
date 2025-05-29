@@ -1,4 +1,4 @@
-# 3. DNA vs RNA comparison
+# 1. DNA vs RNA comparison
 ```R
 library(phyloseq)
 library(ggplot2)
@@ -7,10 +7,7 @@ library(reshape2)
 library(ggpubr)
 setwd("~/rna_dohmain/11-perio/06-red-complex")
 #get relative abundance of dna
-seqtab <- t(read.table("../../rpoc/sequence_table.merged.txt", header=T, row.names=1))
-tax <- read.table("../../rpoc/taxonomy_bac.txt", header=F, row.names=1, sep="\t")
-map <- read.table("../../homd_map/map.txt", sep="\t", header=T, row.names=1)
-ps.dat <- phyloseq(otu_table(seqtab, taxa_are_rows=T), sample_data(map), tax_table(as.matrix(tax)))
+load("../../rpoc/ps.RData")
 glom <- tax_glom(ps.dat, taxrank=rank_names(ps.dat)[8])
 rel <- microbiome::transform(ps.dat, "compositional")
 actino <- subset_taxa(rel, V8=="Porphyromonas_gingivalis" | V8=="Tannerella_forsythia" | V8=="Treponema_denticola")
@@ -25,15 +22,16 @@ red_dna <- red_dna %>%
   rename(species = V8)
 red_dna <- red_dna %>%
   rename(value = Abundance)
+red_dna[red_dna$sample == "DM00008V1PQ16-2", ]
 #get relative abundance of rna
-rna_counts <- read.csv("~/rna_dohmain/09-urease/09-global-distro/species_reads.txt", sep='\t')
+rna_counts <- read.csv("~/rna_dohmain/09-urease/09-global-distro/species_rpoC.txt", sep='\t')
 red_rna <- select(rna_counts, sample, Tannerella_forsythia, Porphyromonas_gingivalis, Treponema_denticola)
 red_rna$nucl <- "rna"
 red_rna <- melt(red_rna)
 red_rna <- red_rna %>%
   rename(species = variable)
 map$sample <- row.names(map)
-meta <- select(map, sample, hiv_status)
+meta <- as.data.frame(as.matrix(map)) %>% dplyr::select(sample, hiv_status)
 red_rna <- left_join(meta, red_rna, by = "sample")
 red_rna$value <- red_rna$value / 100
 #combine
@@ -91,8 +89,8 @@ percentages <- species_counts_by_hiv %>%
 
 # Print the results
 print(percentages)
-percentages$hiv_status <- factor(percentages$hiv_status, levels = c("HI", "HEU", "HUU"))
-hivCols <- c("#8213A0", "#FA78FA", "#40A0FA")
+percentages$hiv_status <- factor(percentages$hiv_status, levels = c("HUU", "HEU", "HI"))
+hivCols <- c("#40A0FA", "#FA78FA", "#8213A0")
 
 pdf("samples.red.prop.pdf")
 ggplot() + geom_bar(data = percentages, aes(x = hiv_status, y = percentage, fill = hiv_status), position = "dodge", stat = "identity")+
@@ -109,12 +107,136 @@ sub_precent <- filter(sub_precent, V8 == "Porphyromonas_gingivalis" & hiv_status
 row.names(sub_precent) <- sub_precent$hiv_status
 sub_precent <- select(sub_precent, sample_count, none)
 chisq.test(sub_precent)
+
+
+ps.rare <- rarefy_even_depth(ps.dat, rngseed=1, sample.size=0.99*min(sample_sums(ps.dat)), replace=F)
+
+redcomplex <- subset_taxa(ps.dat, V8=="Porphyromonas_gingivalis" | V8 == "Treponema_denticola" | V8 == "Tannerella_forsythia")
+glom <- tax_glom(redcomplex, taxrank=rank_names(redcomplex)[8])
+data <- psmelt(glom) # create dataframe from phyloseq object
+data$Sample <- factor(data$Sample, levels=unique(data$Sample))
+data$Abundance > 0
+data_more <- data[data$Abundance > 20,]
+hiv_group <- data_more %>%
+  group_by(V8, hiv_status) %>% 
+  summarise(mean_Abudnance = mean(Abundance, na.rm = TRUE)) %>%
+  ungroup()
+hiv_precent <- hiv_group %>%
+  group_by(V8, hiv_status) %>%
+  summarise(total_abundance = sum(mean_Abudnance)) %>%
+  mutate(percentage = (total_abundance / sum(total_abundance)) * 100)
+pdf("sub.hiv.prop.pdf")
+ggplot() + geom_bar(data = hiv_precent, aes(x = V8, y = percentage, fill = hiv_status), position = "stack", stat = "identity")+
+  scale_color_manual(values=hivCols)+
+  scale_fill_manual(values=hivCols)+
+  theme_minimal()
+dev.off()
+system("~/.iterm2/imgcat ./sub.hiv.prop.pdf")
+
+oral_group <- data_more %>%
+  group_by(V8, Oral_Hygiene_Score_Remark) %>% 
+  summarise(mean_Abudnance = mean(Abundance, na.rm = TRUE)) %>%
+  ungroup()
+oral_precent <- oral_group %>%
+  group_by(V8, Oral_Hygiene_Score_Remark) %>%
+  summarise(total_abundance = sum(mean_Abudnance)) %>%
+  mutate(percentage = (total_abundance / sum(total_abundance)) * 100)
+
+oralCols <-c("#8213A0", "#FA78FA", "#40A0FA")
+
+pdf("sub.oral.prop.pdf")
+ggplot() + geom_bar(data = oral_precent, aes(x = V8, y = percentage, fill = Oral_Hygiene_Score_Remark), position = "stack", stat = "identity")+
+  scale_color_manual(values=hivCols)+
+  scale_fill_manual(values=hivCols)+
+  theme_minimal()
+dev.off()
+system("~/.iterm2/imgcat ./sub.oral.prop.pdf")
+
+# find proportaion of samples
+precent_samples <- data %>%
+  group_by(V8) %>% 
+  summarise(
+    total_samples = n(),
+    samples_above_20 = sum(Abundance >= 20, na.rm = TRUE),  
+    percentage_above_20 = (samples_above_20 / total_samples) * 100  
+  )
+
+pdf("sub.red_all.prop.pdf")
+ggplot() + geom_bar(data = precent_samples, aes(x = V8, y = percentage_above_20), position = "stack", stat = "identity")+
+  theme_minimal()
+dev.off()
+system("~/.iterm2/imgcat ./sub.red_all.prop.pdf")
+
+# ASV level
+ps.rare <- rarefy_even_depth(ps.dat, rngseed=1, sample.size=0.99*min(sample_sums(ps.dat)), replace=F)
+
+redcomplex <- subset_taxa(ps.dat, V8=="Porphyromonas_gingivalis" | V8 == "Treponema_denticola" | V8 == "Tannerella_forsythia")
+data <- psmelt(redcomplex) # create dataframe from phyloseq object
+data$Sample <- factor(data$Sample, levels=unique(data$Sample))
+data$Abundance > 0
+data$ASV <- paste0(data$V8,"_", data$OTU)
+data_more <- data[data$Abundance > 10,]
+hiv_group <- data_more %>%
+  group_by(OTU, V8, hiv_status) %>% 
+  summarise(mean_Abudnance = mean(Abundance, na.rm = TRUE)) %>%
+  ungroup()
+hiv_precent <- hiv_group %>%
+  group_by(OTU, V8, hiv_status) %>%
+  summarise(total_abundance = sum(mean_Abudnance)) %>%
+  mutate(percentage = (total_abundance / sum(total_abundance)) * 100)
+pdf("sub.hiv.asv.prop.pdf")
+ggplot() + geom_bar(data = hiv_precent, aes(x = OTU, y = percentage, fill = hiv_status), position = "stack", stat = "identity")+
+  scale_color_manual(values=hivCols)+
+  scale_fill_manual(values=hivCols)+
+  facet_wrap(~V8, scales = "free_x")+
+  theme_minimal()
+dev.off()
+system("~/.iterm2/imgcat ./sub.hiv.asv.prop.pdf")
+
+oral_group <- data_more %>%
+  group_by(OTU, V8, Oral_Hygiene_Score_Remark) %>% 
+  summarise(mean_Abudnance = mean(Abundance, na.rm = TRUE)) %>%
+  ungroup()
+oral_precent <- oral_group %>%
+  group_by(OTU, V8, Oral_Hygiene_Score_Remark) %>%
+  summarise(total_abundance = sum(mean_Abudnance)) %>%
+  mutate(percentage = (total_abundance / sum(total_abundance)) * 100)
+
+oralCols <-c("#8213A0", "#FA78FA", "#40A0FA")
+
+pdf("sub.oral.asv.prop.pdf")
+ggplot() + geom_bar(data = oral_precent, aes(x = OTU, y = percentage, fill = Oral_Hygiene_Score_Remark), position = "stack", stat = "identity")+
+  scale_color_manual(values=hivCols)+
+  scale_fill_manual(values=hivCols)+
+  facet_wrap(~V8, scales = "free_x")+
+  theme_minimal()
+dev.off()
+system("~/.iterm2/imgcat ./sub.oral.asv.prop.pdf")
+
+# find proportaion of samples
+precent_samples <- data %>%
+  group_by(OTU, V8) %>% 
+  summarise(
+    total_samples = n(),
+    samples_above_20 = sum(Abundance >= 20, na.rm = TRUE),  
+    percentage_above_20 = (samples_above_20 / total_samples) * 100  
+  )
+
+pdf("sub.red_all.asv.prop.pdf")
+ggplot() + geom_bar(data = precent_samples, aes(x = OTU, y = percentage_above_20), position = "stack", stat = "identity")+
+  facet_wrap(~V8, scales = "free_x")+
+  theme_minimal()
+dev.off()
+system("~/.iterm2/imgcat ./sub.red_all.asv.prop.pdf")
 ```
 Porportion of all 1960 samples with DNA
 ```R 
 #proportion of samples with P. gingivalis
 # proportion of different types of strep in pd vs pf
 load("~/long_oral/master_phyloseq.RData")
+meta <- read.csv("~/long_oral/map_domhain_long_2.txt", sep="\t", header=T, row.names=1)
+ps.dat <- merge_phyloseq(ps.dat, sample_data(meta))
+
 rel <- microbiome::transform(ps.dat, "compositional")
 strep <- subset_taxa(ps.dat, V8=="Porphyromonas_gingivalis" | V8 == "Treponema_denticola" | V8 == "Tannerella_forsythia")
 glom <- tax_glom(strep, taxrank=rank_names(strep)[8])
@@ -203,8 +325,207 @@ row.names(sub_precent) <- sub_precent$hiv_status
 sub_precent <- select(sub_precent, sample_count, none)
 chisq.test(sub_precent)
 
+
+
+#create barchart that shows species proportion for each hiv category
+hiv_percentage_per_V8 <- data_more %>%
+  group_by(V8, hiv_status) %>% 
+  summarise(total_abundance_per_status = mean(Abundance, na.rm = TRUE)) %>%
+  ungroup() %>%
+  group_by(V8) %>%
+  mutate(percentage = (total_abundance_per_status / sum(total_abundance_per_status)) * 100) %>%
+  ungroup()
+
+pdf("all_samples.hiv.prop.pdf")
+ggplot() + geom_bar(data = hiv_percentage_per_V8, aes(x = V8, y = percentage, fill = hiv_status), position = "stack", stat = "identity")+
+  scale_color_manual(values=hivCols)+
+  scale_fill_manual(values=hivCols)+
+  theme_minimal()
+dev.off()
+system("~/.iterm2/imgcat ./all_samples.hiv.prop.pdf")
+#create barchart that shows species proportion for each oral hygenince category
+ps.rare <- rarefy_even_depth(ps.dat, rngseed=1, sample.size=0.99*min(sample_sums(ps.dat)), replace=F)
+
+redcomplex <- subset_taxa(ps.dat, V8=="Porphyromonas_gingivalis" | V8 == "Treponema_denticola" | V8 == "Tannerella_forsythia")
+glom <- tax_glom(redcomplex, taxrank=rank_names(redcomplex)[8])
+data <- psmelt(glom) # create dataframe from phyloseq object
+data$Sample <- factor(data$Sample, levels=unique(data$Sample))
+data$Abundance > 0
+data_more <- data[data$Abundance > 20,]
+hiv_group <- data_more %>%
+  group_by(V8, hiv_status) %>% 
+  summarise(mean_Abudnance = mean(Abundance, na.rm = TRUE)) %>%
+  ungroup()
+hiv_precent <- hiv_group %>%
+  group_by(V8, hiv_status) %>%
+  summarise(total_abundance = sum(mean_Abudnance)) %>%
+  mutate(percentage = (total_abundance / sum(total_abundance)) * 100)
+pdf("all_samples.hiv.prop.pdf")
+ggplot() + geom_bar(data = hiv_precent, aes(x = V8, y = percentage, fill = hiv_status), position = "stack", stat = "identity")+
+  scale_color_manual(values=hivCols)+
+  scale_fill_manual(values=hivCols)+
+  theme_minimal()
+dev.off()
+system("~/.iterm2/imgcat ./all_samples.hiv.prop.pdf")
+
+oral_group <- data_more %>%
+  group_by(V8, Oral_Hygiene_Score_Remark) %>% 
+  summarise(mean_Abudnance = mean(Abundance, na.rm = TRUE)) %>%
+  ungroup()
+oral_precent <- oral_group %>%
+  group_by(V8, Oral_Hygiene_Score_Remark) %>%
+  summarise(total_abundance = sum(mean_Abudnance)) %>%
+  mutate(percentage = (total_abundance / sum(total_abundance)) * 100)
+
+oralCols <-c("#8213A0", "#FA78FA", "#40A0FA")
+
+pdf("all_samples.oral.prop.pdf")
+ggplot() + geom_bar(data = oral_precent, aes(x = V8, y = percentage, fill = Oral_Hygiene_Score_Remark), position = "stack", stat = "identity")+
+  scale_color_manual(values=hivCols)+
+  scale_fill_manual(values=hivCols)+
+  theme_minimal()
+dev.off()
+system("~/.iterm2/imgcat ./all_samples.oral.prop.pdf")
+
+# find proportaion of samples
+precent_samples <- data %>%
+  group_by(V8) %>% 
+  summarise(
+    total_samples = n(),
+    samples_above_20 = sum(Abundance >= 20, na.rm = TRUE),  
+    percentage_above_20 = (samples_above_20 / total_samples) * 100  
+  )
+
+pdf("all_samples.red_all.prop.pdf")
+ggplot() + geom_bar(data = precent_samples, aes(x = V8, y = percentage_above_20), position = "stack", stat = "identity")+
+  theme_minimal()
+dev.off()
+system("~/.iterm2/imgcat ./all_samples.red_all.prop.pdf")
+
+
+# ASV level
+ps.rare <- rarefy_even_depth(ps.dat, rngseed=1, sample.size=0.99*min(sample_sums(ps.dat)), replace=F)
+
+redcomplex <- subset_taxa(ps.dat, V8=="Porphyromonas_gingivalis" | V8 == "Treponema_denticola" | V8 == "Tannerella_forsythia")
+data <- psmelt(redcomplex) # create dataframe from phyloseq object
+data$Sample <- factor(data$Sample, levels=unique(data$Sample))
+data$Abundance > 0
+data$ASV <- paste0(data$V8,"_", data$OTU)
+data_more <- data[data$Abundance > 10,]
+hiv_group <- data_more %>%
+  group_by(OTU, V8, hiv_status) %>% 
+  summarise(mean_Abudnance = mean(Abundance, na.rm = TRUE)) %>%
+  ungroup()
+hiv_precent <- hiv_group %>%
+  group_by(OTU, V8, hiv_status) %>%
+  summarise(total_abundance = sum(mean_Abudnance)) %>%
+  mutate(percentage = (total_abundance / sum(total_abundance)) * 100)
+pdf("all_samples.hiv.asv.prop.pdf")
+ggplot() + geom_bar(data = hiv_precent, aes(x = OTU, y = percentage, fill = hiv_status), position = "stack", stat = "identity")+
+  scale_color_manual(values=hivCols)+
+  scale_fill_manual(values=hivCols)+
+  facet_wrap(~V8, scales = "free_x")+
+  theme_minimal()
+dev.off()
+system("~/.iterm2/imgcat ./all_samples.hiv.asv.prop.pdf")
+
+oral_group <- data_more %>%
+  group_by(OTU, V8, Oral_Hygiene_Score_Remark) %>% 
+  summarise(mean_Abudnance = mean(Abundance, na.rm = TRUE)) %>%
+  ungroup()
+oral_precent <- oral_group %>%
+  group_by(OTU, V8, Oral_Hygiene_Score_Remark) %>%
+  summarise(total_abundance = sum(mean_Abudnance)) %>%
+  mutate(percentage = (total_abundance / sum(total_abundance)) * 100)
+
+oralCols <-c("#8213A0", "#FA78FA", "#40A0FA")
+
+pdf("all_samples.oral.asv.prop.pdf")
+ggplot() + geom_bar(data = oral_precent, aes(x = OTU, y = percentage, fill = Oral_Hygiene_Score_Remark), position = "stack", stat = "identity")+
+  scale_color_manual(values=hivCols)+
+  scale_fill_manual(values=hivCols)+
+  facet_wrap(~V8, scales = "free_x")+
+  theme_minimal()
+dev.off()
+system("~/.iterm2/imgcat ./all_samples.oral.asv.prop.pdf")
+
+# find proportaion of samples
+precent_samples <- data %>%
+  group_by(OTU, V8) %>% 
+  summarise(
+    total_samples = n(),
+    samples_above_20 = sum(Abundance >= 20, na.rm = TRUE),  
+    percentage_above_20 = (samples_above_20 / total_samples) * 100  
+  )
+
+pdf("all_samples.red_all.asv.prop.pdf")
+ggplot() + geom_bar(data = precent_samples, aes(x = OTU, y = percentage_above_20), position = "stack", stat = "identity")+
+  facet_wrap(~V8, scales = "free_x")+
+  theme_minimal()
+dev.off()
+system("~/.iterm2/imgcat ./all_samples.red_all.asv.prop.pdf")
 ```
-# 2. Compare DeSeq2 outputs
+# 2. Differences in CLR Abundance
+```R
+library(phyloseq)
+library(ggplot2)
+library(tidyverse)
+library(reshape2)
+library(ggpubr)
+setwd("~/rna_dohmain/11-perio/06-red-complex")
+#get relative abundance of dna
+seqtab <- t(read.table("../../rpoc/sequence_table.merged.txt", header=T, row.names=1))
+tax <- read.table("../../rpoc/taxonomy_bac.txt", header=F, row.names=1, sep="\t")
+map <- read.table("../../homd_map/map.txt", sep="\t", header=T, row.names=1)
+ps.dat <- phyloseq(otu_table(seqtab, taxa_are_rows=T), sample_data(map), tax_table(as.matrix(tax)))
+# tax_table(ps.dat) <- tax_table(ps.dat)[, c("V8")]
+glom <- tax_glom(ps.dat, taxrank="V8")
+rel <- microbiome::transform(glom, "clr")
+actino <- subset_taxa(rel, V8=="Porphyromonas_gingivalis")
+data_bp <- psmelt(actino) #getting object into a dataframe
+data_pb_2 <- select(data_bp, Sample, Abundance, hiv_status, OTU) 
+hiv_stat <- c("HI", "HEU", "HUU")
+hivCols <- c("#8213A0", "#FA78FA", "#40A0FA")
+pdf("porphyromonas_gingivalis.boxplot.pdf")
+ggplot(data_pb_2, aes(x=factor(hiv_status, levels=hiv_stat),y=Abundance))+
+  geom_pwc(label = "{p.adj.format}{p.adj.signif}", hide.ns =TRUE, p.adjust.method = "fdr") + #adds signficance between the categories
+  geom_boxplot() +
+  geom_jitter(aes(color=hiv_status), shape=16, position=position_jitter(0.2), size=2.5)+
+  scale_color_manual(values = hivCols)+ #color dots by sample
+  labs(x ="Bimonthly", y = "CLR Abundance")+
+  theme_classic()
+dev.off()
+system("~/.iterm2/imgcat ./porphyromonas_gingivalis.boxplot.pdf")
+
+actino <- subset_taxa(rel, V8=="Treponema_denticola")
+data_bp <- psmelt(actino) #getting object into a dataframe
+data_pb_2 <- select(data_bp, Sample, Abundance, hiv_status, OTU)
+pdf("treponema_denticola.boxplot.pdf")
+ggplot(data_pb_2, aes(x=factor(hiv_status, levels=hiv_stat),y=Abundance))+
+  geom_pwc(label = "{p.adj.format}{p.adj.signif}", hide.ns =TRUE, p.adjust.method = "fdr") + #adds signficance between the categories
+  geom_boxplot() +
+  geom_jitter(aes(color=hiv_status), shape=16, position=position_jitter(0.2), size=2.5)+
+  scale_color_manual(values = hivCols)+ #color dots by sample
+  labs(x ="Bimonthly", y = "CLR Abundance")+
+  theme_classic()
+dev.off()
+system("~/.iterm2/imgcat ./treponema_denticola.boxplot.pdf")
+
+actino <- subset_taxa(rel, V8=="Tannerella_forsythia")
+data_bp <- psmelt(actino) #getting object into a dataframe
+data_pb_2 <- select(data_bp, Sample, Abundance, hiv_status, OTU)
+pdf("tannerella_forsythia.boxplot.pdf")
+ggplot(data_pb_2, aes(x=factor(hiv_status, levels=hiv_stat),y=Abundance))+
+  geom_pwc(label = "{p.adj.format}{p.adj.signif}", hide.ns =TRUE, p.adjust.method = "fdr") + #adds signficance between the categories
+  geom_boxplot() +
+  geom_jitter(aes(color=hiv_status), shape=16, position=position_jitter(0.2), size=2.5)+
+  scale_color_manual(values = hivCols)+ #color dots by sample
+  labs(x ="Bimonthly", y = "CLR Abundance")+
+  theme_classic()
+dev.off()
+system("~/.iterm2/imgcat ./tannerella_forsythia.boxplot.pdf")
+```
+# 3. Compare DeSeq2 outputs
 ```R
 library(ggplot2, warn.conflicts = F, quietly = T)
 library(DESeq2, warn.conflicts = F, quietly = T)
@@ -332,6 +653,15 @@ ggplot() + geom_bar(data = combined_df, aes(x = sample, y = Log2Fold, fill = nuc
   theme_minimal()
 dev.off()
 system("~/.iterm2/imgcat ./red.RNAvDNA.bar.pdf")
+
+pdf("red.log2.corr.pdf")
+ggscatter(combined_df, x = "log2fold.x", y = "log2fold.y",
+   add = "reg.line", conf.int = TRUE, cor.method="spearman")+
+ stat_cor(aes(color = hiv_status))+
+ # facet_wrap(~species)+
+ theme_minimal()
+dev.off()
+system("~/.iterm2/imgcat ./red.log2.corr.pdf")
 ```
 RNA/DNA ration
 ```R
@@ -489,6 +819,7 @@ save.image("ASV_corncob.RData")
 ```
 
 
+# 4. Comparing DeSeq2 Outputs
 ```R
 library(phyloseq)
 library(ggplot2)
@@ -537,7 +868,10 @@ ann <- ann[sortrow, , drop=FALSE]
 table(rownames(HI)==rownames(ann)) # should all return true
 # if all are true, merge together
 HI <- cbind(HI, ann)
-HI <- HI %>% filter(gene == "kgp" | gene == "rgpB" | gene == "rgpA" | gene == "hagA" | gene == "fimA" | gene== "serC" | gene =="folD" | gene== "fhs" | gene =="sda" | gene == "susB" | gene == "kly" | gene == "eno" | gene == "hagA" | gene == "fimA" | gene == "oppA" | gene == "prtP"  | gene == "flaA" | gene == "flaB"| gene == "fliE" | gene == "cheX" | gene == "cheY" | gene == "hbpA" | gene == "hbpB" | gene == "troA" | gene =="bspA")
+
+HI <- HI %>% filter(gene == "rpoC")
+
+# HI <- HI %>% filter(gene == "kgp" | gene == "rgpB" | gene == "rgpA" | gene == "hagA" | gene == "fimA" | gene== "serC" | gene =="folD" | gene== "fhs" | gene =="sda" | gene == "susB" | gene == "kly" | gene == "eno" | gene == "hagA" | gene == "fimA" | gene == "oppA" | gene == "prtP"  | gene == "flaA" | gene == "flaB"| gene == "fliE" | gene == "cheX" | gene == "cheY" | gene == "hbpA" | gene == "hbpB" | gene == "troA" | gene =="bspA")
 
 rna_change <- HI %>%
   group_by(species) %>%
@@ -546,14 +880,14 @@ rna_change
 
 #combine data
 comb1 <- left_join(red_dna, rna_change, by = c("GeneInfo"="species"))
-pdf("red.log2.corr.pdf")
+pdf("red.log2.HIvHUU.corr.pdf")
 ggscatter(comb1, x = "log2fold.x", y = "log2fold.y",
    add = "reg.line", conf.int = TRUE, cor.method="spearman")+
  stat_cor()+
  # facet_wrap(~species)+
  theme_minimal()
 dev.off()
-system("~/.iterm2/imgcat ./red.log2.corr.pdf")
+system("~/.iterm2/imgcat ./red.log2.HIvHUU.corr.pdf")
 ```
 HEU vs HUU
 ```R
@@ -604,7 +938,9 @@ ann <- ann[sortrow, , drop=FALSE]
 table(rownames(HI)==rownames(ann)) # should all return true
 # if all are true, merge together
 HI <- cbind(HI, ann)
-HI <- HI %>% filter(gene == "kgp" | gene == "rgpB" | gene == "rgpA" | gene == "hagA" | gene == "fimA" | gene== "serC" | gene =="folD" | gene== "fhs" | gene =="sda" | gene == "susB" | gene == "kly" | gene == "eno" | gene == "hagA" | gene == "fimA" | gene == "oppA" | gene == "prtP"  | gene == "flaA" | gene == "flaB"| gene == "fliE" | gene == "cheX" | gene == "cheY" | gene == "hbpA" | gene == "hbpB" | gene == "troA" | gene =="bspA")
+HI <- HI %>% filter(gene == "rpoC")
+
+# HI <- HI %>% filter(gene == "kgp" | gene == "rgpB" | gene == "rgpA" | gene == "hagA" | gene == "fimA" | gene== "serC" | gene =="folD" | gene== "fhs" | gene =="sda" | gene == "susB" | gene == "kly" | gene == "eno" | gene == "hagA" | gene == "fimA" | gene == "oppA" | gene == "prtP"  | gene == "flaA" | gene == "flaB"| gene == "fliE" | gene == "cheX" | gene == "cheY" | gene == "hbpA" | gene == "hbpB" | gene == "troA" | gene =="bspA")
 
 rna_change <- HI %>%
   group_by(species) %>%
@@ -613,14 +949,14 @@ rna_change
 
 #combine data
 comb2 <- left_join(red_dna, rna_change, by = c("GeneInfo"="species"))
-pdf("red.log2.corr.pdf")
+pdf("red.log2.HEUvHUU.corr.pdf")
 ggscatter(comb2, x = "log2fold.x", y = "log2fold.y",
    add = "reg.line", conf.int = TRUE, cor.method="spearman")+
  stat_cor()+
  # facet_wrap(~species)+
  theme_minimal()
 dev.off()
-system("~/.iterm2/imgcat ./red.log2.corr.pdf")
+system("~/.iterm2/imgcat ./red.log2.HEUvHUU.corr.pdf")
 ```
 Combine
 ```R
@@ -633,3 +969,147 @@ ggscatter(comb, x = "log2fold.x", y = "log2fold.y",
  theme_minimal()
 dev.off()
 system("~/.iterm2/imgcat ./red.log2.corr.pdf")
+```
+# 5. Comparing DeSeq2 using VLD
+```R
+library(ggplot2, warn.conflicts = F, quietly = T)
+library(DESeq2, warn.conflicts = F, quietly = T)
+library(apeglm, warn.conflicts = F, quietly = T)
+library(EnhancedVolcano)
+library(dplyr)
+library(viridis)
+library(phyloseq)
+#load data
+setwd("/home/suzanne/rna_dohmain/11-perio/06-red-complex")
+#RNA
+metadata <- read.table("~/rna_dohmain/homd_map/map.txt", header=T, sep="\t")
+# remove dashes from health categories or it will mess up downstream processing
+metadata$aliquot_type <- sub("-", "", metadata$aliquot_type)
+row.names(metadata) <- metadata$sample_id
+# read in gene counts file
+genecounts <- read.table("./red_counts.txt", header=T, sep="\t", row.names=1)
+# get rid of weird empty column in genecounts
+# genecounts <- genecounts[1:(length(genecounts)-1)]
+# fix sample names in gene counts so they match the metadata
+colnames(genecounts) <- gsub(x = names(genecounts), pattern = "\\.red", replacement = "") 
+colnames(genecounts) <- gsub(x = names(genecounts), pattern = "\\.", replacement = "-") 
+# filter metadata so that we only compare H to D
+submap <- metadata[metadata$hiv_status == "HEU" | metadata$hiv_status == "HI" | metadata$hiv_status == "HUU",]
+# submap <- submap[submap$sample_id %in% sample_list, ]
+subcount <- genecounts[, colnames(genecounts) %in% row.names(submap)]
+# add pseudocount to avoid errors with size factor estimation
+subcount <- subcount + 1
+# reorder columns by metadata 
+submap <- submap[order(colnames(subcount)),]
+# colnames(genecounts)
+# rownames(metadata)
+# check to make sure that sample ids match between gene counts and metadata
+table(colnames(subcount)==submap$sample_id) # should return all true
+
+# create deseq object
+star_results <- DESeqDataSetFromMatrix(countData = subcount, colData = submap, design = ~hiv_status)
+star_results <- star_results[rowSums(counts(star_results)) >= 50,]
+star_results
+star_results$hiv_status <- factor(star_results$hiv_status, levels=c("HI", "HEU","HUU"))
+
+# run deseq
+ptm <- proc.time()
+se_star <- DESeq(star_results, fitType="local")
+proc.time() - ptm 
+#pcoa diversity
+vld_RNA <- varianceStabilizingTransformation(se_star)
+
+
+#DNA
+load("../../rpoc/ps.RData")
+metadata <- read.table("~/rna_dohmain/homd_map/map.txt", header=T, sep="\t")
+# remove dashes from health categories or it will mess up downstream processing
+metadata$aliquot_type <- sub("-", "", metadata$aliquot_type)
+row.names(metadata) <- metadata$sample_id
+# read in gene counts file
+glom <- tax_glom(ps.dat, "V8")
+genecounts <- t(otu_table(glom)) # get rid of weird empty column in genecounts
+# filter metadata so that we only compare H to D
+submap <- metadata[metadata$hiv_status == "HUU" | metadata$hiv_status == "HEU" | metadata$hiv_status == "HI",]
+subcount <- genecounts[, colnames(genecounts) %in% row.names(submap)]
+# add pseudocount to avoid errors with size factor estimation
+subcount <- subcount + 1
+# reorder columns by metadata 
+submap <- submap[order(colnames(subcount)),]
+# colnames(genecounts)
+# rownames(metadata)
+# check to make sure that sample ids match between gene counts and metadata
+table(colnames(subcount)==submap$sample_id) # should return all true
+subcount <- as.data.frame(subcount)
+# create deseq object
+star_results <- DESeqDataSetFromMatrix(countData = subcount, colData = submap, design = ~hiv_status)
+star_results <- star_results[rowSums(counts(star_results)) >= 50,]
+star_results
+star_results$hiv_status <- factor(star_results$hiv_status, levels=c("HI", "HEU","HUU"))
+# run deseq
+ptm <- proc.time()
+se_star <- DESeq(star_results, fitType="local")
+proc.time() - ptm 
+vld_DNA <- varianceStabilizingTransformation(se_star)
+
+#combine the two datasets
+library(reshape2)
+#pull out just rpoC
+homd <- read.table("../06-red-complex/red_annots.txt", header=T, sep="\t", quote="") 
+rownames(homd) <- homd$tag
+rpoC_tags <- homd$tag[homd$gene == "rpoC"]
+vld_rna <- melt(assay(vld_RNA)[rpoC_tags,])
+ann <- homd[homd$tag %in% vld_rna$Var1,]
+rownames(ann) <- ann$tag
+merged_rna <- merge(vld_rna, ann, by.x = "Var1", by.y = "tag")
+
+median_values <- merged_rna %>%
+  group_by(Var2, species) %>%
+  summarise(mean_value = mean(value, na.rm = TRUE))
+# get just red complex asvs
+target_species <- c("Porphyromonas_gingivalis", "Treponema_denticola", "Tannerella_forsythia")
+tax_table_ps <- as.data.frame(tax_table(glom))
+subset_tax <- tax_table_ps[, "V8"] %in% target_species
+target_asvs <- rownames(tax_table_ps)[subset_tax]
+vld_dna <- melt(assay(vld_DNA)[target_asvs,])
+colnames(vld_dna) <- c("species", "sample", "value")
+vld_dna <- vld_dna %>%
+  mutate(species = case_when(
+    species == "ASV12" ~ "Porphyromonas_gingivalis",
+    species == "ASV103" ~ "Tannerella_forsythia",
+    species == "ASV1811" ~ "Treponema_denticola",
+    TRUE ~ species  # keep original if no match
+  ))
+merged_df <- merge(median_values, vld_dna, by.x = c("Var2", "species"), by.y = c("sample", "species"), all.x = TRUE)
+merged_df <- merge(merged_df, metadata, by.x = "Var2", by.y = "sample_id", all.x = TRUE)
+
+library(ggpubr)
+merged_df$hiv_status <- factor(merged_df$hiv_status, levels = c("HUU", "HEU", "HI"))
+pdf("red.vld.corr.pdf")
+ggscatter(merged_df, x = "value", y = "mean_value",
+   add = "reg.line", conf.int = TRUE, cor.method="spearman")+
+ stat_cor()+
+ facet_wrap(species ~ hiv_status)+
+ theme_minimal()
+dev.off()
+system("~/.iterm2/imgcat ./red.vld.corr.pdf")
+
+library(tidyr)
+colnames(median_values) <- c("sample", "species", "value")
+median_values$nucl <- "rna"
+
+vld_dna$nucl <- "dna"
+combined_df <- rbind(median_values, vld_dna)
+combined_df <- merge(combined_df, metadata, by.x = "sample", by.y = "sample_id", all.x = TRUE)
+combined_df$hiv_status <- factor(combined_df$hiv_status, levels = c("HUU", "HEU", "HI"))
+combined_df2 <- combined_df %>%
+  group_by(hiv_status, species, nucl) %>%
+  summarise(mean_value = mean(value, na.rm = TRUE))
+
+pdf("red.RNAvDNA.rpoC.bar.pdf", width = 13)
+ggplot() + geom_bar(data = combined_df2, aes(x = species, y = mean_value, fill = nucl), position = "dodge", stat = "identity")+
+  facet_grid(~hiv_status, switch = "x", scales = "free_x")+
+  theme_minimal()
+dev.off()
+system("~/.iterm2/imgcat ./red.RNAvDNA.rpoC.bar.pdf")
+```

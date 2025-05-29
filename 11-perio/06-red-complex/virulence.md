@@ -196,12 +196,14 @@ combined_sub <- combined_data %>% filter(gene == "kgp" | gene == "rgpB" | gene =
 row <- rows2[, c("seq", "name")]
 #make donut plots
 gene_sum <- combined_sub %>% 
+  group_by(hiv_status, contig, species) %>% 
+  summarise(Total_genome = sum(value, na.rm = TRUE))
+gene_sum2 <- gene_sum %>% 
   group_by(hiv_status, species) %>% 
-  summarise(Total = sum(value, na.rm = TRUE))
+  summarise(Total = mean(Total_genome, na.rm = TRUE))
 
-test <- filter(gene_sum, species == "Treponema_denticola")
 pdf("viru.donut.pdf")
-PieDonut(gene_sum, aes("hiv_status", "species", count="Total"), showRatioThreshold = F)
+PieDonut(gene_sum2, aes("hiv_status", "species", count="Total"), showRatioThreshold = F)
 dev.off()
 system("~/.iterm2/imgcat ./viru.donut.pdf")
 ```
@@ -285,3 +287,788 @@ upset(filtered_df, order.by="freq", sets = c("HEU", "HI"), mainbar.y.label="Numb
              params = list("species", "Tannerella_forsythia"), color = "#1E7F7A", active = T)))
 dev.off()
 system("~/.iterm2/imgcat ./HI_HEU.upset.viru.pdf")
+```
+# 4. Tree 
+Make core gene tree
+```sh
+mkdir tree && cd tree
+# rename headers
+
+#get core genes
+python3 core_genes.py > core_genes
+zcat *fna.gz > all_genomes.fna
+awk '!/^>/ { printf "%s", $0; n = "\n" } /^>/ { print n $0; n = "" } END { printf "%s", n } ' all_genomes.fna > temp
+mv temp all_genomes.fna
+cat core_genes | while read line; do echo "$line: $(grep -cw "$line" all_genomes.fna)"; done # make sure only 53 are there
+
+# get genes for alignment
+cat core_genes | while read line; do grep -w $line all_genomes.fna | awk '{print $1}' | sed 's/>//' > $line.ids; done
+
+ls *ids | sed 's/.ids//' | while read line; do seqtk subseq all_genomes.fna $line.ids > $line.fa; done
+
+sed -i 's/lcl|//' *fa
+sed -i 's/].*//' *fa
+sed -i 's/ \[/_/' *fa
+
+# align
+ls *fa | sed 's/.fa//'| while read line; do mafft --thread -1 $line.fa > $line.align.fa; done
+cat *align.fa > core_genome.align.fa
+awk '!/^>/ { printf "%s", $0; n = "\n" } /^>/ { print n $0; n = "" } END { printf "%s", n } ' core_genome.align.fa > temp
+mv temp core_genome.align.fa
+python3 combine_core.py
+grep ">" combined_core.align.fna -c
+
+# make trees
+fasttree -nt combined_core.align.fna > combined_core.tre
+raxmlHPC-PTHREADS-SSE3 -T 190 -m GTRCAT -c 25 -e 0.001 -p 31514 -f a -N 100 -x 02938 -n tre -s combined_core.align.fna
+
+# make annotation file
+cat rpoC.ids | sed 's/\..*//' | sed 's/lcl|//' | sort | uniq | while read line; do grep -m 1 $line ../red_annots.txt | awk -F "\t" '{print $1, $6}' | sed 's/ /\t/' ; done | sed '1s/^/genome\tspecies\n/'> combined_core.annots.txt
+```
+Examin expression of genes in R
+```R
+library(ggplot2, warn.conflicts = F, quietly = T)
+library(DESeq2, warn.conflicts = F, quietly = T)
+library(apeglm, warn.conflicts = F, quietly = T)
+library(EnhancedVolcano, warn.conflicts = F, quietly = T)
+library(dplyr, warn.conflicts = F, quietly = T)
+library(viridis, warn.conflicts = F, quietly = T)
+library(phyloseq, warn.conflicts = F, quietly = T)
+library(phytools, warn.conflicts = F, quietly = T)
+library(phyloseq.extended, warn.conflicts = F, quietly = T)
+library(tidyr)
+library(ggpubr)
+library(ggtree)
+library(gridExtra)
+library(patchwork)
+library("cowplot")
+require(phylobase)
+
+#load data
+setwd("/home/suzanne/rna_dohmain/11-perio/06-red-complex/tree")
+load("../deseq_results_red-HIvHUU.RData")
+tree <- read.tree("./RAxML_bestTree.tre")
+tree.root <- midpoint_root(tree)
+tip_labels <- gsub("'","",rev(tree.root$tip.label))
+
+# add in annotations
+homd <- read.table("../red_annots.txt", header=T, sep="\t", quote="")
+# filter by locus tag 
+resdf <- as.data.frame(resLFC)
+ann <- homd[homd$tag %in% rownames(resdf),]
+
+# reorder
+rownames(ann) <- ann$tag
+sortrow <- rownames(ann)[order(match(rownames(resdf), rownames(ann)))]
+
+resdf <- resdf[sortrow, , drop=FALSE]
+ann <- ann[sortrow, , drop=FALSE]
+# check that locus tags match between the two dataframes
+table(rownames(resdf)==rownames(ann)) # should all return true
+# if all are true, merge together
+resdf <- cbind(resdf, ann)
+
+# set LFC and P value filters
+lfc = 2
+pval = 0.05
+
+# get list of loci that are significant and have a log FC of 2+
+sigloc <- resdf %>% filter(padj <= pval) %>% filter(log2FoldChange >= lfc | log2FoldChange <= -lfc) 
+# get new dataframe with concatenated genus species and locus id
+sigsp <- paste("x", sigloc$genus, sep="_")
+sigdf <- as.data.frame(cbind(sigloc$tag, sigsp))
+
+# split the dataframe as a list by genus
+siglist <- split(sigdf$V1, sigdf$sigsp)
+
+# remove any lists (i.e., genera) with fewer than three hits
+siglist <- Filter(function(x) length(x) >=3, siglist)
+
+# create object for each genus
+# remove previously created lists or will mess up
+rm(list = grep("^x_", ls(), value=TRUE))
+for(genus in names(siglist)){
+  assign(genus, unname(siglist[[genus]]))
+}
+
+# get an object containing all genes of interest
+all_genes <- do.call(c, siglist)
+# add as target genes
+resdf$target_gene <- rownames(resdf) %in% all_genes
+# order by target gene
+res_ord <- resdf[order(resdf$target_gene),]
+res_ord <- res_ord %>% filter(gene != "none")
+# get a large number of colors from the viridis package to iterate over
+keycolors <- viridis(length(siglist))
+
+genus_to_color <- rep(NA, length(unlist(siglist)))
+names(genus_to_color) <- unlist(siglist)
+# map colors to genus
+for (i in seq_along(siglist)){
+  species_group <- siglist[[i]]
+  color <- keycolors[i]
+  genus_to_color[species_group] <- color
+}
+# add to dataframe
+res_ord$color <- genus_to_color[rownames(res_ord)]
+# if no color, remove genus label
+res_ord$genus[is.na(res_ord$color)] <- NA
+# change NA genus to grey
+res_ord$color[is.na(res_ord$color)] <- "#808080"
+
+# get key value pairs for plotting
+colormap <- setNames(res_ord$color, res_ord$genus)
+# finally get a list of the top 10 genes (based on highest p value) to label on the volcano plot
+tempdf <- res_ord[res_ord$target_gene == TRUE,]
+# sort the dataframe by logfold change
+sortdf <- tempdf[order(tempdf$log2FoldChange),]
+# get top 10 genes for disease
+low <- head(sortdf$tag, 10)
+# negative top 10
+top <- tail(sortdf$tag, 10)
+# concatenate
+labgenes <- c(top, low)
+#combine species and gene
+res_ord$GeneInfo <- paste(res_ord$species,res_ord$gene)
+res_ord$gene_name <- gsub(x = res_ord$gene, pattern = "_.", replacement = "") 
+
+sig_average <- res_ord %>%
+  group_by(contig, species) %>%
+  summarise(
+    avg_baseMean = mean(baseMean, na.rm = TRUE),
+    avg_log2FoldChange = mean(log2FoldChange, na.rm = TRUE)
+  )
+
+sig_average_long <- sig_average %>%
+  pivot_longer(cols = c(avg_baseMean, avg_log2FoldChange), 
+               names_to = "metric", 
+               values_to = "value")
+
+# get avg_log2FoldChange
+sig_average_log2 <- sig_average %>%
+  select(contig, avg_log2FoldChange, species) %>%
+  pivot_longer(cols = "avg_log2FoldChange", 
+               names_to = "metric", 
+               values_to = "value")
+
+# get avg_baseMean
+sig_average_baseMean <- sig_average %>%
+  select(contig, avg_baseMean, species) %>%
+  pivot_longer(cols = "avg_baseMean", 
+               names_to = "metric", 
+               values_to = "value")
+
+
+# make the heatmaps 
+heatmap_plot <- ggplot(mapping = aes(x = metric, y = factor(contig, levels=tip_labels))) +
+  geom_tile(data = sig_average_log2, aes(fill = value)) +
+  scale_fill_distiller(type = "seq", palette = "GnBu", guide = guide_colorbar(title = "Average log fold change", title.position = "top")) +
+  ggnewscale::new_scale_fill() +
+  geom_tile(data = sig_average_baseMean, aes(fill = value)) +
+  scale_fill_distiller(type = "seq", palette = "Greys", direction = 1, guide = guide_colorbar(title = "Average base mean", title.position = "top")) +
+  facet_grid(.~metric, scales = "free_x", space = "free_x") +
+  scale_x_discrete(position = "top", expand = c(0,0)) +
+  scale_y_discrete(labels = NULL) +
+  theme_classic() +
+  theme(strip.text = element_blank(),
+        legend.position = "right",
+        axis.ticks = element_blank(),
+        axis.line = element_blank()) +
+  labs(x = NULL, y = NULL)
+# tree
+tr2 <- phylo4d(tree.root, res_ord$species[match(tree.root$tip.label, res_ord$contig)])
+
+tree_plot <- ggtree(tr2) + 
+  geom_tiplab(align = TRUE, size =3,offset = 1) + 
+  geom_tippoint(aes(color=dt, x = 20), alpha=1) +
+  scale_color_manual(values = c("Porphyromonas_gingivalis" = "#340043", 
+                               "Tannerella_forsythia" = "#FBE51F", 
+                               "Treponema_denticola" = "#1E7F7A")) +
+  theme(legend.position = "none")+
+  xlim(0, 25)
+pdf("combined_heat.all_genes.pdf", width =10)
+tree_plot + heatmap_plot + plot_layout(ncol = 2, widths = c(3, 3))
+dev.off()
+system("~/.iterm2/imgcat ./combined_heat.all_genes.pdf")
+
+
+# now make it for virulence factors
+virulence_genes_pg <- c("kgp", "rgpB", "rgpA", "hagA", "fimA", "fimB", "serC")
+# Tannerella forsythia
+virulence_genes_tf <- c("susB", "kly", "eno", "hagA", "fimA")
+# Treponema denticola
+virulence_genes_td <- c("oppA", "flaA", "flaB", "fliE", "cheX", "cheY", "hbpA", "hbpB", "troA" )
+
+# calculate the average baseMean and log2fold
+average_pg <- res_ord %>%
+  filter(gene %in% virulence_genes_pg & species == "Porphyromonas_gingivalis") %>%
+  group_by(contig, species) %>%
+  summarise(
+    avg_baseMean_factor = mean(baseMean, na.rm = TRUE),
+    avg_log2FoldChange_factor = mean(log2FoldChange, na.rm = TRUE)
+  )
+average_tf <- res_ord %>%
+  filter(gene %in% virulence_genes_tf & species == "Tannerella_forsythia") %>%
+  group_by(contig, species) %>%
+  summarise(
+    avg_baseMean_factor = mean(baseMean, na.rm = TRUE),
+    avg_log2FoldChange_factor = mean(log2FoldChange, na.rm = TRUE)
+  )
+average_td <- res_ord %>%
+  filter(gene %in% virulence_genes_td & species == "Treponema_denticola") %>%
+  group_by(contig, species) %>%
+  summarise(
+    avg_baseMean_factor = mean(baseMean, na.rm = TRUE),
+    avg_log2FoldChange_factor = mean(log2FoldChange, na.rm = TRUE)
+  )
+
+# combine
+average_values <- rbind(average_pg, average_tf, average_td)
+
+# overall
+sig_average_long <- average_values %>%
+  pivot_longer(cols = c(avg_baseMean, avg_log2FoldChange), 
+               names_to = "metric", 
+               values_to = "value")
+
+# get avg_log2FoldChange
+sig_average_log2 <- average_values %>%
+  select(contig, avg_log2FoldChange, species) %>%
+  pivot_longer(cols = "avg_log2FoldChange", 
+               names_to = "metric", 
+               values_to = "value")
+
+# get avg_baseMean
+sig_average_baseMean <- average_values %>%
+  select(contig, avg_baseMean, species) %>%
+  pivot_longer(cols = "avg_baseMean", 
+               names_to = "metric", 
+               values_to = "value")
+
+heatmap_plot <- ggplot(mapping = aes(x = metric, y = factor(contig, levels=tip_labels))) +
+  geom_tile(data = sig_average_log2, aes(fill = value), color ="black") +
+  scale_fill_distiller(type = "seq", palette = "GnBu", guide = guide_colorbar(title = "Average log fold change", title.position = "top")) +
+  ggnewscale::new_scale_fill() +
+  geom_tile(data = sig_average_baseMean, aes(fill = value), color ="black") +
+  scale_fill_distiller(type = "seq", palette = "Greys", direction = 1, guide = guide_colorbar(title = "Average base mean", title.position = "top")) +
+  facet_grid(.~metric, scales = "free_x", space = "free_x") +
+  scale_x_discrete(position = "top", expand = c(0,0)) +
+  scale_y_discrete(labels = NULL) +
+  theme_classic() +
+  theme(strip.text = element_blank(),
+        legend.position = "right",
+        axis.ticks = element_blank(),
+        axis.line = element_blank()) +
+  labs(x = NULL, y = NULL)
+
+tr2 <- phylo4d(tree.root, res_ord$species[match(tree.root$tip.label, res_ord$contig)])
+tree_plot <- ggtree(tr2) + 
+  geom_tiplab(align = TRUE, size =3,offset = 1) + 
+  geom_tippoint(aes(color=dt, x = 20), alpha=1) +
+  scale_color_manual(values = c("Porphyromonas_gingivalis" = "#340043", 
+                               "Tannerella_forsythia" = "#FBE51F", 
+                               "Treponema_denticola" = "#1E7F7A")) +
+  theme(legend.position = "none")+
+  xlim(0, 25)
+
+pdf("combined_heat.viru_genes.pdf", width = 12, height = 6)
+tree_plot + heatmap_plot + plot_layout(ncol = 2, widths = c(3, 3))
+dev.off()
+system("~/.iterm2/imgcat ./combined_heat.viru_genes.pdf")
+
+
+# for p. gingivalis
+# get avg_log2FoldChange
+sig_average_log2_sub<- filter(sig_average_log2, species == "Porphyromonas_gingivalis")
+sig_average_baseMean_sub<- filter(sig_average_baseMean, species == "Porphyromonas_gingivalis")
+
+# get avg_log2FoldChange for virus
+sig_average_log2_sub_virus <- average_pg %>%
+  select(contig, avg_log2FoldChange_factor, species) %>%
+  pivot_longer(cols = "avg_log2FoldChange_factor", 
+               names_to = "metric", 
+               values_to = "value")
+sig_average_baseMean_sub_virus <- average_pg %>%
+  select(contig, avg_baseMean_factor, species) %>%
+  pivot_longer(cols = "avg_baseMean_factor", 
+               names_to = "metric", 
+               values_to = "value")
+# keep tree nodes
+sig_average_baseMean_sub$contig
+
+tree.sub <- keep.tip(tree.root, sig_average_baseMean_sub$contig)
+
+heatmap_plot <- ggplot(mapping = aes(x = metric, y = factor(contig, levels=tip_labels))) +
+  geom_tile(data = sig_average_log2_sub, aes(fill = value), color ="black") +
+  scale_fill_distiller(type = "seq", palette = "GnBu", guide = guide_colorbar(title = "Average log fold change", title.position = "top")) +
+  ggnewscale::new_scale_fill() +
+  geom_tile(data = sig_average_baseMean_sub, aes(fill = value), color ="black") +
+  scale_fill_distiller(type = "seq", palette = "Greys", direction = 1, guide = guide_colorbar(title = "Average base mean", title.position = "top")) +
+  ggnewscale::new_scale_fill() +
+  geom_tile(data = sig_average_log2_sub_virus, aes(fill = value), color ="black") +
+  scale_fill_distiller(type = "seq", palette = "YlGn", direction = -1, guide = guide_colorbar(title = "Average base mean for virulence factors", title.position = "top")) +
+  ggnewscale::new_scale_fill() +
+  geom_tile(data = sig_average_baseMean_sub_virus, aes(fill = value), color ="black") +
+  scale_fill_distiller(type = "seq", palette = "Purples", direction = 1, guide = guide_colorbar(title = "Average base mean for virulence factors", title.position = "top")) +
+  facet_grid(.~metric, scales = "free_x", space = "free_x") +
+  scale_x_discrete(position = "top", expand = c(0,0)) +
+  scale_y_discrete(labels = NULL) +
+  theme_classic() +
+  theme(strip.text = element_blank(),
+        legend.position = "right",
+        axis.ticks = element_blank(),
+        axis.line = element_blank()) +
+  labs(x = NULL, y = NULL)
+
+tr3 <- phylo4d(tree.sub, res_ord$species[match(tree.sub$tip.label, res_ord$contig)])
+tree_plot <- ggtree(tr3) + 
+  geom_tiplab(align = TRUE, size =3,offset = .0009) + 
+  geom_tippoint(aes(color=dt, x = .012), alpha=1) +
+  scale_color_manual(values = c("Porphyromonas_gingivalis" = "#340043", 
+                               "Tannerella_forsythia" = "#FBE51F", 
+                               "Treponema_denticola" = "#1E7F7A")) +
+  theme(legend.position = "none")+
+  xlim(0, .0135)
+
+pdf("pging_heat.viru_genes.pdf", width = 12, height = 6)
+tree_plot + heatmap_plot + plot_layout(ncol = 2, widths = c(3, .75))
+dev.off()
+system("~/.iterm2/imgcat ./pging_heat.viru_genes.pdf")
+
+# for t. denticola
+# get avg_log2FoldChange
+sig_average_log2_sub<- filter(sig_average_log2, species == "Treponema_denticola")
+sig_average_baseMean_sub<- filter(sig_average_baseMean, species == "Treponema_denticola")
+
+# get avg_log2FoldChange for virus
+sig_average_log2_sub_virus <- average_td %>%
+  select(contig, avg_log2FoldChange_factor, species) %>%
+  pivot_longer(cols = "avg_log2FoldChange_factor", 
+               names_to = "metric", 
+               values_to = "value")
+sig_average_baseMean_sub_virus <- average_td %>%
+  select(contig, avg_baseMean_factor, species) %>%
+  pivot_longer(cols = "avg_baseMean_factor", 
+               names_to = "metric", 
+               values_to = "value")
+# keep tree nodes
+sig_average_baseMean_sub$contig
+
+tree.sub <- keep.tip(tree.root, sig_average_baseMean_sub$contig)
+
+heatmap_plot <- ggplot(mapping = aes(x = metric, y = factor(contig, levels=tip_labels))) +
+  geom_tile(data = sig_average_log2_sub, aes(fill = value), color ="black") +
+  scale_fill_distiller(type = "seq", palette = "GnBu", guide = guide_colorbar(title = "Average log fold change", title.position = "top")) +
+  ggnewscale::new_scale_fill() +
+  geom_tile(data = sig_average_baseMean_sub, aes(fill = value), color ="black") +
+  scale_fill_distiller(type = "seq", palette = "Greys", direction = 1, guide = guide_colorbar(title = "Average base mean", title.position = "top")) +
+  ggnewscale::new_scale_fill() +
+  geom_tile(data = sig_average_log2_sub_virus, aes(fill = value), color ="black") +
+  scale_fill_distiller(type = "seq", palette = "YlGn", direction = -1, guide = guide_colorbar(title = "Average base mean for virulence factors", title.position = "top")) +
+  ggnewscale::new_scale_fill() +
+  geom_tile(data = sig_average_baseMean_sub_virus, aes(fill = value), color ="black") +
+  scale_fill_distiller(type = "seq", palette = "Purples", direction = 1, guide = guide_colorbar(title = "Average base mean for virulence factors", title.position = "top")) +
+  facet_grid(.~metric, scales = "free_x", space = "free_x") +
+  scale_x_discrete(position = "top", expand = c(0,0)) +
+  scale_y_discrete(labels = NULL) +
+  theme_classic() +
+  theme(strip.text = element_blank(),
+        legend.position = "right",
+        axis.ticks = element_blank(),
+        axis.line = element_blank()) +
+  labs(x = NULL, y = NULL)
+
+tr3 <- phylo4d(tree.sub, res_ord$species[match(tree.sub$tip.label, res_ord$contig)])
+tree_plot <- ggtree(tr3) + 
+  geom_tiplab(align = TRUE, size =3,offset = .009) + 
+  geom_tippoint(aes(color=dt, x = .11), alpha=1) +
+  scale_color_manual(values = c("Porphyromonas_gingivalis" = "#340043", 
+                               "Tannerella_forsythia" = "#FBE51F", 
+                               "Treponema_denticola" = "#1E7F7A")) +
+  theme(legend.position = "none")+
+  xlim(0, .19)
+
+pdf("tdent_heat.viru_genes.pdf", width = 8, height = 6)
+tree_plot + heatmap_plot + plot_layout(ncol = 2, widths = c(1, .5))
+dev.off()
+system("~/.iterm2/imgcat ./tdent_heat.viru_genes.pdf")
+```
+
+
+
+
+
+
+
+# Just p. gingivalis tree
+```sh
+mkdir p_gingivalis && cd p_gingivalis
+
+paste -d "/" <(cat ../assembly_summary_refseq.txt | grep Porphyromonas | grep gingivalis | grep -v cangingivalis | grep "Complete Genome" | awk -F"\t" '{print $20}' | sed 's/\/GFA_/\t\/GFA_/') <(cat ../assembly_summary_refseq.txt | grep Porphyromonas | grep gingivalis | grep "Complete Genome" | awk -F"\t" '{print $20}' | sed 's/\/GFA_/\t\/GFA_/' | awk '{print $0,$NF}' | sed 's/$/_cds_from_genomic.fna.gz/' | awk '{print $2}' | sed 's/.*GCF/GCF/') > query
+wget -i query 
+
+#get core genes
+python3 ../core_genes.py > core_genes
+zcat *fna.gz > all_genomes.fna
+awk '!/^>/ { printf "%s", $0; n = "\n" } /^>/ { print n $0; n = "" } END { printf "%s", n } ' all_genomes.fna > temp
+mv temp all_genomes.fna
+cat core_genes | while read line; do echo "$line: $(grep -cw "$line" all_genomes.fna)"; done # make sure only 34 are there
+
+# get genes for alignment
+cat core_genes | while read line; do grep -w $line all_genomes.fna | awk '{print $1}' | sed 's/>//' > $line.ids; done
+
+ls *ids | sed 's/.ids//' | while read line; do seqtk subseq all_genomes.fna $line.ids > $line.fa; done
+
+sed -i 's/lcl|//' *fa
+sed -i 's/].*//' *fa
+sed -i 's/ \[/_/' *fa
+
+# align
+ls *fa | sed 's/.fa//'| while read line; do mafft --thread -1 $line.fa > $line.align.fa; done
+cat *align.fa > core_genome.align.fa
+awk '!/^>/ { printf "%s", $0; n = "\n" } /^>/ { print n $0; n = "" } END { printf "%s", n } ' core_genome.align.fa > temp
+mv temp core_genome.align.fa
+python3 ../combine_core.py
+grep ">" combined_core.align.fna -c
+
+# make trees
+fasttree -nt combined_core.align.fna > combined_core.tre
+raxmlHPC-PTHREADS-SSE3 -T 190 -m GTRCAT -c 25 -e 0.001 -p 31514 -f a -N 100 -x 02938 -n tre -s combined_core.align.fna
+
+# make annotation file
+cat rpoC.ids | sed 's/\..*//' | sed 's/lcl|//' | sort | uniq | while read line; do grep -m 1 $line ../../red_annots.txt | awk -F "\t" '{print $1, $6}' | sed 's/ /\t/' ; done | sed '1s/^/genome\tspecies\n/'> combined_core.annots.txt
+```
+Examin expression of genes in R
+```R
+library(ggplot2, warn.conflicts = F, quietly = T)
+library(DESeq2, warn.conflicts = F, quietly = T)
+library(apeglm, warn.conflicts = F, quietly = T)
+library(EnhancedVolcano, warn.conflicts = F, quietly = T)
+library(dplyr, warn.conflicts = F, quietly = T)
+library(viridis, warn.conflicts = F, quietly = T)
+library(phyloseq, warn.conflicts = F, quietly = T)
+library(phytools, warn.conflicts = F, quietly = T)
+library(phyloseq.extended, warn.conflicts = F, quietly = T)
+library(tidyr)
+library(ggpubr)
+library(ggtree)
+library(gridExtra)
+library(patchwork)
+library("cowplot")
+require(phylobase)
+
+#load data
+setwd("/home/suzanne/rna_dohmain/11-perio/06-red-complex/tree/p_gingivalis")
+load("../../deseq_results_red-HIvHUU.RData")
+tree <- read.tree("./RAxML_bestTree.tre")
+tree.root <- midpoint_root(tree)
+tip_labels <- gsub("'","",rev(tree.root$tip.label))
+
+# add in annotations
+homd <- read.table("../../red_annots.txt", header=T, sep="\t", quote="")
+# filter by locus tag 
+resdf <- as.data.frame(resLFC)
+ann <- homd[homd$tag %in% rownames(resdf),]
+
+# reorder
+rownames(ann) <- ann$tag
+sortrow <- rownames(ann)[order(match(rownames(resdf), rownames(ann)))]
+
+resdf <- resdf[sortrow, , drop=FALSE]
+ann <- ann[sortrow, , drop=FALSE]
+# check that locus tags match between the two dataframes
+table(rownames(resdf)==rownames(ann)) # should all return true
+# if all are true, merge together
+resdf <- cbind(resdf, ann)
+
+# set LFC and P value filters
+lfc = 2
+pval = 0.05
+
+# get list of loci that are significant and have a log FC of 2+
+sigloc <- resdf %>% filter(padj <= pval) %>% filter(log2FoldChange >= lfc | log2FoldChange <= -lfc) 
+# get new dataframe with concatenated genus species and locus id
+sigsp <- paste("x", sigloc$genus, sep="_")
+sigdf <- as.data.frame(cbind(sigloc$tag, sigsp))
+
+# split the dataframe as a list by genus
+siglist <- split(sigdf$V1, sigdf$sigsp)
+
+# remove any lists (i.e., genera) with fewer than three hits
+siglist <- Filter(function(x) length(x) >=3, siglist)
+
+# create object for each genus
+# remove previously created lists or will mess up
+rm(list = grep("^x_", ls(), value=TRUE))
+for(genus in names(siglist)){
+  assign(genus, unname(siglist[[genus]]))
+}
+
+# get an object containing all genes of interest
+all_genes <- do.call(c, siglist)
+# add as target genes
+resdf$target_gene <- rownames(resdf) %in% all_genes
+# order by target gene
+res_ord <- resdf[order(resdf$target_gene),]
+res_ord <- res_ord %>% filter(gene != "none")
+# get a large number of colors from the viridis package to iterate over
+keycolors <- viridis(length(siglist))
+
+genus_to_color <- rep(NA, length(unlist(siglist)))
+names(genus_to_color) <- unlist(siglist)
+# map colors to genus
+for (i in seq_along(siglist)){
+  species_group <- siglist[[i]]
+  color <- keycolors[i]
+  genus_to_color[species_group] <- color
+}
+# add to dataframe
+res_ord$color <- genus_to_color[rownames(res_ord)]
+# if no color, remove genus label
+res_ord$genus[is.na(res_ord$color)] <- NA
+# change NA genus to grey
+res_ord$color[is.na(res_ord$color)] <- "#808080"
+
+# get key value pairs for plotting
+colormap <- setNames(res_ord$color, res_ord$genus)
+# finally get a list of the top 10 genes (based on highest p value) to label on the volcano plot
+tempdf <- res_ord[res_ord$target_gene == TRUE,]
+# sort the dataframe by logfold change
+sortdf <- tempdf[order(tempdf$log2FoldChange),]
+# get top 10 genes for disease
+low <- head(sortdf$tag, 10)
+# negative top 10
+top <- tail(sortdf$tag, 10)
+# concatenate
+labgenes <- c(top, low)
+#combine species and gene
+res_ord$GeneInfo <- paste(res_ord$species,res_ord$gene)
+res_ord$gene_name <- gsub(x = res_ord$gene, pattern = "_.", replacement = "") 
+res_ord_sub <- filter(res_ord, species == "Porphyromonas_gingivalis")
+
+sig_average <- res_ord_sub %>%
+  group_by(contig, species) %>%
+  summarise(
+    avg_baseMean = mean(baseMean, na.rm = TRUE),
+    avg_log2FoldChange = mean(log2FoldChange, na.rm = TRUE)
+  )
+
+sig_average_long <- sig_average %>%
+  pivot_longer(cols = c(avg_baseMean, avg_log2FoldChange), 
+               names_to = "metric", 
+               values_to = "value")
+
+# get avg_log2FoldChange
+sig_average_log2 <- sig_average %>%
+  select(contig, avg_log2FoldChange, species) %>%
+  pivot_longer(cols = "avg_log2FoldChange", 
+               names_to = "metric", 
+               values_to = "value")
+
+# get avg_baseMean
+sig_average_baseMean <- sig_average %>%
+  select(contig, avg_baseMean, species) %>%
+  pivot_longer(cols = "avg_baseMean", 
+               names_to = "metric", 
+               values_to = "value")
+
+# make graph
+heatmap_plot <- ggplot(mapping = aes(x = metric, y = factor(contig, levels=tip_labels))) +
+  geom_tile(data = sig_average_log2, aes(fill = value)) +
+  scale_fill_distiller(type = "seq", palette = "GnBu", guide = guide_colorbar(title = "Average log fold change", title.position = "top")) +
+  ggnewscale::new_scale_fill() +
+  geom_tile(data = sig_average_baseMean, aes(fill = value)) +
+  scale_fill_distiller(type = "seq", palette = "Greys", direction = 1, guide = guide_colorbar(title = "Average base mean", title.position = "top")) +
+  facet_grid(.~metric, scales = "free_x", space = "free_x") +
+  scale_x_discrete(position = "top", expand = c(0,0)) +
+  scale_y_discrete(labels = NULL) +
+  theme_classic() +
+  theme(strip.text = element_blank(),
+        legend.position = "right",
+        axis.ticks = element_blank(),
+        axis.line = element_blank()) +
+  labs(x = NULL, y = NULL)
+
+
+tr2 <- phylo4d(tree.root, res_ord_sub$species[match(tree.root$tip.label, res_ord_sub$contig)])
+tree_plot <- ggtree(tr2)+ 
+  geom_tiplab(align = TRUE, size =3,offset = .0005) +
+  geom_tippoint(aes(color=dt, x = .0085), alpha=1) +
+  scale_color_manual(values = c("Porphyromonas_gingivalis" = "#340043")) +
+  theme(legend.position = "none")+
+  xlim(0, .015)
+
+pdf("pging_heat.all_genes.pdf", width =10)
+tree_plot + heatmap_plot + plot_layout(ncol = 2, widths = c(3, 3))
+dev.off()
+system("~/.iterm2/imgcat ./pging_heat.all_genes.pdf")
+
+
+
+pdf("test.pdf")
+ggtree(tr2)+ 
+  geom_tiplab(align = TRUE, size =3,offset = .0005) +
+  geom_tippoint(aes(color=dt, x = .0085), alpha=1) +
+  scale_color_manual(values = c("Porphyromonas_gingivalis" = "#340043")) +
+  theme(legend.position = "none")+
+  xlim(0, .02)
+dev.off()
+system("~/.iterm2/imgcat ./test.pdf")
+
+
+
+
+
+
+
+# now make it for virulence factors
+virulence_genes_pg <- c("kgp", "rgpB", "rgpA", "hagA", "fimA")
+# Tannerella forsythia
+virulence_genes_tf <- c("susB", "kly", "eno", "hagA", "fimA")
+# Treponema denticola
+virulence_genes_td <- c("oppA", "flaA", "flaB", "fliE", "cheX", "cheY", "hbpA", "hbpB", "troA" )
+
+# calculate the average baseMean and log2fold
+average_pg <- res_ord %>%
+  filter(gene %in% virulence_genes_pg & species == "Porphyromonas_gingivalis") %>%
+  group_by(contig, species) %>%
+  summarise(
+    avg_baseMean = mean(baseMean, na.rm = TRUE),
+    avg_log2FoldChange = mean(log2FoldChange, na.rm = TRUE)
+  )
+average_tf <- res_ord %>%
+  filter(gene %in% virulence_genes_tf & species == "Tannerella_forsythia") %>%
+  group_by(contig, species) %>%
+  summarise(
+    avg_baseMean = mean(baseMean, na.rm = TRUE),
+    avg_log2FoldChange = mean(log2FoldChange, na.rm = TRUE)
+  )
+average_td <- res_ord %>%
+  filter(gene %in% virulence_genes_td & species == "Treponema_denticola") %>%
+  group_by(contig, species) %>%
+  summarise(
+    avg_baseMean = mean(baseMean, na.rm = TRUE),
+    avg_log2FoldChange = mean(log2FoldChange, na.rm = TRUE)
+  )
+
+# combine
+average_values <- rbind(average_pg, average_tf, average_td)
+
+# overall
+sig_average_long <- average_values %>%
+  pivot_longer(cols = c(avg_baseMean, avg_log2FoldChange), 
+               names_to = "metric", 
+               values_to = "value")
+
+# get avg_log2FoldChange
+sig_average_log2 <- average_values %>%
+  select(contig, avg_log2FoldChange, species) %>%
+  pivot_longer(cols = "avg_log2FoldChange", 
+               names_to = "metric", 
+               values_to = "value")
+
+# get avg_baseMean
+sig_average_baseMean <- average_values %>%
+  select(contig, avg_baseMean, species) %>%
+  pivot_longer(cols = "avg_baseMean", 
+               names_to = "metric", 
+               values_to = "value")
+
+tree.root$species <- species_df$species[match(tree.root$tip.label, species_df$contig)]
+
+tree_plot <- ggtree(tr2) + 
+  geom_tiplab(align = TRUE, size =3,offset = 1) + 
+  geom_tippoint(aes(color=dt, x = 20), alpha=1) +
+  scale_color_manual(values = c("Porphyromonas_gingivalis" = "#340043", 
+                               "Tannerella_forsythia" = "#FBE51F", 
+                               "Treponema_denticola" = "#1E7F7A")) +
+  theme(legend.position = "none")+
+  xlim(0, 25)
+
+require(phylobase)
+tr2 <- phylo4d(tree.root, res_ord$species[match(tree.root$tip.label, res_ord$contig)])
+pdf("test.pdf")
+ggtree(tr2) + 
+  geom_tiplab(align = TRUE, size =3,offset = 1) + 
+  geom_tippoint(aes(color=dt, x = 20), alpha=1) +
+  scale_color_manual(values = c("Porphyromonas_gingivalis" = "#340043", 
+                               "Tannerella_forsythia" = "#FBE51F", 
+                               "Treponema_denticola" = "#1E7F7A")) +
+  theme(legend.position = "none")+
+  xlim(0, 25)
+dev.off()
+system("~/.iterm2/imgcat ./test.pdf")
+
+
+heatmap_plot <- ggplot(mapping = aes(x = metric, y = factor(contig, levels=tip_labels))) +
+  geom_tile(data = sig_average_log2, aes(fill = value), color ="black") +
+  scale_fill_distiller(type = "seq", palette = "GnBu", guide = guide_colorbar(title = "Average log fold change", title.position = "top")) +
+  ggnewscale::new_scale_fill() +
+  geom_tile(data = sig_average_baseMean, aes(fill = value), color ="black") +
+  scale_fill_distiller(type = "seq", palette = "Greys", direction = 1, guide = guide_colorbar(title = "Average base mean", title.position = "top")) +
+  facet_grid(.~metric, scales = "free_x", space = "free_x") +
+  scale_x_discrete(position = "top", expand = c(0,0)) +
+  scale_y_discrete(labels = NULL) +
+  theme_classic() +
+  theme(strip.text = element_blank(),
+        legend.position = "right",
+        axis.ticks = element_blank(),
+        axis.line = element_blank()) +
+  labs(x = NULL, y = NULL)
+
+pdf("combined_heat.viru_genes.pdf", width = 12, height = 6)
+tree_plot + heatmap_plot + plot_layout(ncol = 2, widths = c(3, 3))
+dev.off()
+system("~/.iterm2/imgcat ./combined_heat.viru_genes.pdf")
+
+
+# for p. gingivalis
+# get avg_log2FoldChange
+sig_average_log2_sub <- average_pg %>%
+  select(contig, avg_log2FoldChange, species) %>%
+  pivot_longer(cols = "avg_log2FoldChange", 
+               names_to = "metric", 
+               values_to = "value")
+
+# get avg_baseMean
+sig_average_baseMean_sub <- average_pg %>%
+  select(contig, avg_baseMean, species) %>%
+  pivot_longer(cols = "avg_baseMean", 
+               names_to = "metric", 
+               values_to = "value")
+# drop tree
+sig_average_baseMean_sub$contig
+
+tree.sub <- keep.tip(tree.root, sig_average_baseMean_sub$contig)
+
+tr3 <- phylo4d(tree.sub, res_ord$species[match(tree.sub$tip.label, res_ord$contig)])
+tree_plot <- ggtree(tr3) + 
+  geom_tiplab(align = TRUE, size =3,offset = 1) + 
+  geom_tippoint(aes(color=dt, x = 20), alpha=1) +
+  scale_color_manual(values = c("Porphyromonas_gingivalis" = "#340043", 
+                               "Tannerella_forsythia" = "#FBE51F", 
+                               "Treponema_denticola" = "#1E7F7A")) +
+  theme(legend.position = "none")+
+  xlim(0, 25)
+
+
+heatmap_plot <- ggplot(mapping = aes(x = metric, y = factor(contig, levels=tip_labels))) +
+  geom_tile(data = sig_average_log2_sub, aes(fill = value), color ="black") +
+  scale_fill_distiller(type = "seq", palette = "GnBu", guide = guide_colorbar(title = "Average log fold change", title.position = "top")) +
+  ggnewscale::new_scale_fill() +
+  geom_tile(data = sig_average_baseMean_sub, aes(fill = value), color ="black") +
+  scale_fill_distiller(type = "seq", palette = "Greys", direction = 1, guide = guide_colorbar(title = "Average base mean", title.position = "top")) +
+  facet_grid(.~metric, scales = "free_x", space = "free_x") +
+  scale_x_discrete(position = "top", expand = c(0,0)) +
+  scale_y_discrete(labels = NULL) +
+  theme_classic() +
+  theme(strip.text = element_blank(),
+        legend.position = "right",
+        axis.ticks = element_blank(),
+        axis.line = element_blank()) +
+  labs(x = NULL, y = NULL)
+
+pdf("pging_heat.viru_genes.pdf", width = 12, height = 6)
+tree_plot + heatmap_plot + plot_layout(ncol = 2, widths = c(3, 3))
+dev.off()
+system("~/.iterm2/imgcat ./pging_heat.viru_genes.pdf")

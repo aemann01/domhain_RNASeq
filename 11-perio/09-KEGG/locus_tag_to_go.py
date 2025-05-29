@@ -3,13 +3,12 @@
 from Bio import SeqIO
 import pandas as pd
 
-# Path to your GenBank file
 genbank_file = 'combined_genbank_file.gbk'
 
-# List to store the extracted data
+# need an empty list
 data = []
 
-# Parse the GenBank file
+# getting go function that maps to lccus tag
 for record in SeqIO.parse(genbank_file, 'genbank'):
     for feature in record.features:
         if feature.type == 'CDS':
@@ -20,7 +19,7 @@ for record in SeqIO.parse(genbank_file, 'genbank'):
                 'Go_term': go_term
             })
 
-# Convert list of dictionaries to a DataFrame
+# make df and save
 df = pd.DataFrame(data)
 df['Go_term'] = df['Go_term'].str.split(' - ').str[0]
 df['Go_term'] = df['Go_term'].replace('', 'no_term')

@@ -3,13 +3,12 @@
 from Bio import SeqIO
 import pandas as pd
 
-# Path to your GenBank file
 genbank_file = 'combined_genbank_file.gbk'
 
-# List to store the extracted data
+# need an empty list
 data = []
 
-# Parse the GenBank file
+# Get locus tag and protein id makes a list data
 for record in SeqIO.parse(genbank_file, 'genbank'):
     for feature in record.features:
         if feature.type == 'CDS':
@@ -20,8 +19,8 @@ for record in SeqIO.parse(genbank_file, 'genbank'):
                 'Protein_ID': protein_id
             })
 
-# Convert list of dictionaries to a DataFrame
 df = pd.DataFrame(data)
+#save data
 df_uniprot = pd.read_csv('gene_refseq_uniprotkb_collab', delimiter="\t")
 merged_df = pd.merge(df, df_uniprot, left_on='Protein_ID', right_on='#NCBI_protein_accession', how='inner')
 final_df = merged_df[['Locus_tag', 'UniProtKB_protein_accession']]

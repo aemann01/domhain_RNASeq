@@ -115,11 +115,13 @@ combined_data <- merge(gene_long, metadata, by.x = "variable", by.y = "sample_id
 
 #make donut plots
 gene_sum <- combined_data %>% 
+  group_by(hiv_status, contig, species) %>% 
+  summarise(Total_genome = sum(value, na.rm = TRUE))
+gene_sum2 <- gene_sum %>% 
   group_by(hiv_status, species) %>% 
-  summarise(Total = sum(value, na.rm = TRUE))
-
+  summarise(Total = mean(Total_genome, na.rm = TRUE))
 pdf("red_rna.donut.pdf")
-PieDonut(gene_sum, aes("hiv_status", "species", count="Total"), showRatioThreshold = F)
+PieDonut(gene_sum2, aes("hiv_status", "species", count="Total"), showRatioThreshold = F)
 dev.off()
 system("~/.iterm2/imgcat ./red_rna.donut.pdf")
 ```

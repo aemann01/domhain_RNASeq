@@ -59,6 +59,16 @@ ls DM*.gz | sed 's/\..*//' | sort | uniq -u | while IFS= read -r line; do
         echo "Error processing ${line}"
     fi
 done
+
+sudo docker run --rm \
+    -v /home/suzanne/rna_dohmain/11-perio/08-humann2:/data \
+    biobakery/humann:latest \
+    humann --input /data/DM00103V1PQ16.fastq.gz \
+    --output /data/humann \
+    --threads 60 \
+    --nucleotide-database /data/humann_dbs/chocophlan \
+    --protein-database /data/humann_dbs/uniref \
+    --taxonomic-profile /data/DM00103V1PQ16.metaphlan.txt
 ```
 ```sh
 chmod 755 humann3.sh
@@ -74,7 +84,7 @@ Running on palmetto
 #SBATCH --nodes 1
 #SBATCH --tasks-per-node 40
 #SBATCH --cpus-per-task 1
-#SBATCH --mem 750gb
+#SBATCH --mem 650gb
 #SBATCH --time 72:00:00
 #SBATCH --constraint interconnect_fdr
 #SBATCH --output=%x.%j.out
@@ -89,7 +99,10 @@ apptainer exec humann3.sif humann \
     --protein-database /scratch/scrull/hiv_rnaseq/08-humann2/humann_dbs/uniref \
     --taxonomic-profile /scratch/scrull/hiv_rnaseq/08-humann2/SAMPLE.metaphlan.txt
 
-rm SAMPLE_humann_temp
+rm -r ./humann/SAMPLE_humann_temp
+rm ./SAMPLE.fastq.gz
+rm ./SAMPLE.fastq.gz.bowtie2out.txt
+rm ./SAMPLE.metaphlan.txt
 ```
 
 Creapt scripts and submit them
@@ -99,22 +112,165 @@ ls /home/scrull/rna_scripts/02-operon-mapping/DM*.sh | sed 's/\..*//' | sed 's/.
 ls /home/scrull/rna_scripts/02-operon-mapping/DM*.sh | sed 's/\..*//' | sed 's/.*\///' | sort | uniq | while read line; do sed "s/SAMPLE/$line/g" example.sh > $line.sh ; done
 # submit
 ls D*sh | while read line; do sbatch $line; done
+ls /scratch/scrull/hiv_rnaseq/08-humann2/DM*fastq.gz | sed 's/.*DM/DM/' | sed 's/.fastq.gz/.sh/' | while read line; do sbatch $line; done
+```
+# Combine
+```sh
+sudo docker run --rm \
+    -v /home/suzanne/rna_dohmain/11-perio/08-humann2:/data \
+    biobakery/humann:latest \
+    humann_join_tables -i /data/humann \
+    -o /data/hmp_subset_genefamilies.tsv \
+    --file_name genefamilies
+
+#normalize
+sudo docker run --rm \
+    -v /home/suzanne/rna_dohmain/11-perio/08-humann2:/data \
+    biobakery/humann:latest \
+    humann_renorm_table -i /data/hmp_subset_genefamilies.tsv \
+    -o /data/hmp_subset_genefamilies-cpm.tsv \
+    --units cpm
+
+
+sudo docker run --rm \
+    -v /home/suzanne/rna_dohmain/11-perio/08-humann2:/data \
+    biobakery/humann:latest \
+    humann_join_tables -i /data/humann \
+    -o /data/hmp_subset_pathabundance.tsv \
+    --file_name pathabundance
+
+sudo docker run --rm \
+    -v /home/suzanne/rna_dohmain/11-perio/08-humann2:/data \
+    biobakery/humann:latest \
+    humann_renorm_table -i /data/hmp_subset_pathabundance.tsv \
+    -o /data/hmp_subset_pathabundance-cpm.tsv \
+    --units cpm
+python3 add_hiv.py
+sed -i 's/# Pathway/FEATURE \\ SAMPLE/' updated_abundance.tsv
+
+humann_barplot --input updated_abundance.tsv --focal-metadata hiv_status --last-metadata hiv_status \
+    --output plot1.png --focal-feature METSYN-PWY 
+humann_barplot --input updated_abundance.tsv --focal-metadata hiv_status --last-metadata hiv_status \
+    --output plot2.png --focal-feature METSYN-PWY --sort sum
+humann_barplot --input updated_abundance.tsv --focal-metadata hiv_status --last-metadata hiv_status \
+    --output plot3.png --focal-feature METSYN-PWY --sort sum metadata --scaling logstack
+
+
+merge_metaphlan_tables.py *.metaphlan.txt > ./merged_abundance_table.txt
+sed -i '1d' merged_abundance_table.txt
+python3 transpose.py merged_abundance_table.txt merged_abundance_trans.txt
+sed -i 's/.metaphlan//'  merged_abundance_trans.txt
+
+sed 's/_Abundance//g' hmp_subset_pathabundance-cpm.tsv > pathabundance_rel.tsv
+```
+# Maaslyn2
+```R
+library(Maaslin2)
+
+#data
+df_input_data = read.table(file = "merged_abundance_trans.txt", header = TRUE, sep = "\t", row.names = 1,stringsAsFactors = FALSE)
+colnames(df_input_data) <- df_input_data[1, ]
+df_input_data <- df_input_data[-1, ]
+df_input_data[1:5, 1:5]
+#metadata
+df_input_metadata = read.table(file = "~/rna_dohmain/metadata.txt", header = TRUE, sep = "\t", row.names = 1,stringsAsFactors = FALSE)
+df_input_metadata$sample <- rownames(df_input_metadata)
+df_input_metadata <- subset(df_input_metadata, !sample %in% c("DM00103V1PQ16", "DM00035V2PQ16"))
+df_input_metadata[1:5, ]
+#pathways
+df_input_path = read.csv("./pathabundance_rel.tsv", sep = "\t", stringsAsFactors = FALSE, row.names = 1)
+df_input_path[1:5, 1:5]
+
+#running Maaslin2
+fit_data2 = Maaslin2(input_data     = df_input_data, 
+                     input_metadata = df_input_metadata, 
+                     min_prevalence = 0,
+                     normalization  = "NONE",
+                     output         = "demo_output2", 
+                     fixed_effects  = c("hiv_status"),
+                     reference      = c("hiv_status,HUU"),
+                     transform      = "NONE",
+                     correction = "BH")
+
+
+df_input_metadata$hiv_status <- factor(df_input_metadata$hiv_status)
+levels(df_input_metadata$hiv_status)
+
+fit_func = Maaslin2(input_data     = df_input_path, 
+                    input_metadata = df_input_metadata, 
+                    output         = "hiv_functional", 
+                    fixed_effects  = c("hiv_status"),
+                    reference      = c("hiv_status,HUU"),
+                    transform      = "NONE",
+                    correction = "BH",)
+
+# Filter the results, keeping rows where pval <= 0.05
+filtered_results <- fit_func$results[fit_func$results$pval <= 0.05, , drop = FALSE]
+filtered_results_prorymonas <- filtered_results[grep("Porphyromonas_gingivalis", filtered_results$feature), , drop = FALSE]
+filtered_results_tannerella <- filtered_results[grep("Tannerella_forsythia", filtered_results$feature), , drop = FALSE]
+filtered_results_treponema <- filtered_results[grep("Treponema_denticola", filtered_results$feature), , drop = FALSE]
+filtered_results_prorymonas
+filtered_results_tannerella
+filtered_results_treponema
 ```
 
+# DRAM
+```sh
+cd ~/rna_dohmain/11-perio/05-TrEMBL
+rsync -a ~/rna_dohmain/11-perio/05-TrEMBL/GCA*genomic.fna scrull@hpcdtn01.rcd.clemson.edu:/scratch/scrull/hiv_rnaseq/05-TrEMBL/d
+
+sudo docker pull jinlongru/dram
+#setup databases
+mkdir dram
+sudo docker run -d \
+  -v /home/suzanne/rna_dohmain/11-perio/05-TrEMBL:/mnt/data \
+  -w /mnt/data/dram \
+  --name dram-container \
+  jinlongru/dram \
+  DRAM-setup.py prepare_databases \
+  --output_dir /mnt/data/dram \
+  --threads 40 &
+
+sudo docker logs -f dram-container #for monitoring
+sudo docker start dram-container
+
+sudo docker exec -w /mnt/data/dram -it dram-container \
+  DRAM-setup.py print_config
 
 
+sudo docker exec -w /mnt/data/ -it dram-container \
+  DRAM.py annotate -i '/mnt/data/*_genomic.fna' -o '/mnt/data/dramannots' --threads 50 1> /mnt/data/dram.log 2> /mnt/data/dram.err
 
 
-
-
-
-
-
-
-
-
+DRAM-setup.py print_config
+#run
+DRAM.py annotate -i '*_genomic.fna' -o dramannots --threads 50 1> dram.log 2> dram.err 
 
 ```
+```sh
+#!/bin/bash
+
+#SBATCH --job-name dram-install
+#SBATCH --nodes 1
+#SBATCH --tasks-per-node 20
+#SBATCH --cpus-per-task 1
+#SBATCH --mem 20gb
+#SBATCH --time 48:00:00
+#SBATCH --constraint interconnect_fdr
+#SBATCH --output=%x.%j.out
+#SBATCH --error=%x.%j.err
+
+module add dram/1.4.6
+source /project/cugbf/software/gbf/DRAM/1.4.6.sh
+cd /scratch/scrull/hiv_rnaseq/05-TrEMBL
+cp /project/cugbf/software/gbf/DRAM/DRAM_CUGBF_config.txt ./
+DRAM-setup.py import_config --config_loc DRAM_CUGBF_config.txt
+DRAM-setup.py prepare_databases --output_dir /scratch/scrull/hiv_rnaseq/05-TrEMBL
+```
+```sh
+sbatch dram_setup.sh 
+```
+
 
 
 
