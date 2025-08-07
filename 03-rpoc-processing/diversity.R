@@ -1,5 +1,6 @@
 library(phyloseq)
 library(Biostrings)
+library(metagMisc)
 setwd("~/rna_dohmain/rpoc/")
 #rpoc
 #frequency
@@ -11,13 +12,28 @@ setwd("~/rna_dohmain/rpoc/")
 # #ref sequences
 # refseq_rpoc <- Biostrings::readDNAStringSet("~/rna_dohmain/rpoc/rep_set.fa")
 # #metadata
-# metadata <- read.table("~/rna_dohmain/rpoc/metadata.txt", sep="\t", header=T, row.names=1)
+# metadata <- read.csv("~/rna_dohmain/homd_map/map.txt", sep="\t", header=T, row.names=1)
 # metadata$age_y <- as.numeric(metadata$age_y)
 
 # map <- sample_data(metadata)
 # #merge into one phyloseq object
 # rpoc.pd <- merge_phyloseq(asv_rpoc, tax_rpoc, refseq_rpoc, map)
 # ps.dat <- prune_samples(sample_sums(rpoc.pd) > 4000, rpoc.pd)
+# ps.dat <- phyloseq_filter_prevalence(ps.dat, prev.trh=0.001, abund.trh=50, threshold_condition="OR")
+# # work around
+# otu <- t(as.data.frame(otu_table(ps.dat)))
+
+# prev_counts <- rowSums(otu > 0)
+# prevalence <- prev_counts / ncol(otu)
+
+# # total abundance per OTU
+# abundances <- rowSums(otu)
+
+# # apply filters
+# keep_taxa <- (prevalence > 0.02) | (abundances > 50)
+
+# # Prune to keep only passing OTUs
+# ps.dat <- prune_taxa(keep_taxa, ps.dat)
 
 # save.image("~/rna_dohmain/rpoc/ps.RData")
 

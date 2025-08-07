@@ -1,3 +1,8 @@
+# 0. Make prooka red file
+```sh
+grep -i "locus_tag\|Treponema\|Porphyromonas\|Tannerella" annotations.merge.txt | grep  "locus_tag\|denticola\|gingivalis\|forsythia" > red_annots.txt
+parallel -a <(awk '{print $1}' ./red_annots.txt | sed 's/locus_tag/Geneid/') -j 190 -k " grep -wm 1 '{}' ./read_counts.txt" > red_counts.txt
+```
 # 1. Run DESeq HI vs HUU
 ```R
 library(ggplot2, warn.conflicts = F, quietly = T)
@@ -7,17 +12,16 @@ library(EnhancedVolcano)
 library(dplyr)
 library(viridis)
 #load data
-setwd("/home/suzanne/rna_dohmain/11-perio/03-global-diff")
+setwd("/home/suzanne/rna_dohmain/11-perio/04-red-diff")
 metadata <- read.table("~/rna_dohmain/homd_map/map.txt", header=T, sep="\t")
 # remove dashes from health categories or it will mess up downstream processing
 metadata$aliquot_type <- sub("-", "", metadata$aliquot_type)
 row.names(metadata) <- metadata$sample_id
 # read in gene counts file
-genecounts <- read.table("../02-pgap/gene_counts.txt", header=T, sep="\t", row.names=1)
+genecounts <- read.csv("../../homd_map/red_counts.txt", header=T, sep="\t", row.names=1)
 # get rid of weird empty column in genecounts
 # genecounts <- genecounts[1:(length(genecounts)-1)]
 # fix sample names in gene counts so they match the metadata
-colnames(genecounts) <- gsub(x = names(genecounts), pattern = "\\.red", replacement = "") 
 colnames(genecounts) <- gsub(x = names(genecounts), pattern = "\\.", replacement = "-") 
 # filter metadata so that we only compare H to D
 submap <- metadata[metadata$hiv_status == "HUU" | metadata$hiv_status == "HI",]
@@ -50,46 +54,41 @@ res <- results(se_star, alpha=0.05)
 res <- res[order(res$padj),]
 paste("number of genes with adjusted p value lower than 0.05: ", sum(res$padj < 0.05, na.rm=TRUE))
 summary(res)
-[1] "number of genes with adjusted p value lower than 0.05:  210857"
-# out of 51006 with nonzero total read count
-# out of 6585836 with nonzero total read count
+# [1] "number of genes with adjusted p value lower than 0.05:  49182"
+# out of 243544 with nonzero total read count
 # adjusted p-value < 0.05
-# LFC > 0 (up)       : 96045, 1.5%
-# LFC < 0 (down)     : 114812, 1.7%
+# LFC > 0 (up)       : 698, 0.29%
+# LFC < 0 (down)     : 48484, 20%
 # outliers [1]       : 0, 0%
-# low counts [2]     : 5564940, 84%
+# low counts [2]     : 155513, 64%
 # (mean count < 1)
-# [1] see 'cooksCutoff' argument of ?results
-# [2] see 'independentFiltering' argument of ?results
 # HUU is positive, HEU cavity negative
 resLFC <- lfcShrink(se_star, coef="hiv_status_HUU_vs_HI", type="apeglm")
 resLFC <- resLFC[order(resLFC$padj),]
 paste("number of genes with adjusted p value lower than 0.05: ", sum(resLFC$padj < 0.05, na.rm=TRUE))
 summary(resLFC)
-# [1] "number of genes with adjusted p value lower than 0.05:  210857"# out of 51006 with nonzero total read count
-# out of 6585836 with nonzero total read count
+# [1] "number of genes with adjusted p value lower than 0.05:  51145"
+# out of 243544 with nonzero total read count
 # adjusted p-value < 0.1
-# LFC > 0 (up)       : 123978, 1.9%
-# LFC < 0 (down)     : 147149, 2.2%
+# LFC > 0 (up)       : 2670, 1.1%
+# LFC < 0 (down)     : 58502, 24%
 # outliers [1]       : 0, 0%
-# low counts [2]     : 5564940, 84%
+# low counts [2]     : 173295, 71%
 # (mean count < 1)
-# [1] see 'cooksCutoff' argument of ?results
-# [2] see 'independentFiltering' argument of ?results
-write.table(resLFC, file="deseq_results-HIvHUU.txt", quote=F, sep="\t")
-save.image("deseq_results-HIvHUU.RData")
+write.table(resLFC, file="deseq_results_red-HIvHUU.prokka.txt", quote=F, sep="\t")
+save.image("deseq_results_red-HIvHUU.prokka.RData")
 ```
 Valcona Plot
 ```R
-load("deseq_results-HIvHUU.RData")
+load("deseq_results_red-HIvHUU.prokka.RData")
 # add in annotations
-homd <- read.csv("../02-pgap/gene_annots.txt", header=T, sep="\t", quote="")
+homd <- read.table("../../homd_map/red_annots.txt", header=T, sep="\t", quote="")
 # filter by locus tag 
 resdf <- as.data.frame(resLFC)
-ann <- homd[homd$tag %in% rownames(resdf),]
+ann <- homd[homd$locus_tag %in% rownames(resdf),]
 
 # reorder
-rownames(ann) <- ann$tag
+rownames(ann) <- ann$locus_tag
 sortrow <- rownames(ann)[order(match(rownames(resdf), rownames(ann)))]
 
 resdf <- resdf[sortrow, , drop=FALSE]
@@ -105,21 +104,19 @@ pval = 0.05
 
 # get list of loci that are significant and have a log FC of 2+
 sigloc <- resdf %>% filter(padj <= pval) %>% filter(log2FoldChange >= lfc | log2FoldChange <= -lfc) 
+
 # get new dataframe with concatenated genus species and locus id
-sigsp <- paste("x", sigloc$genus, sep="_")
-sigdf <- as.data.frame(cbind(sigloc$tag, sigsp))
+sigsp <- paste("x", sigloc$Genus, sep="_")
+sigdf <- as.data.frame(cbind(sigloc$locus_tag, sigsp))
 
 # split the dataframe as a list by genus
 siglist <- split(sigdf$V1, sigdf$sigsp)
 
-# remove any lists (i.e., genera) with fewer than three hits
-siglist <- Filter(function(x) length(x) >=3, siglist)
-
 # create object for each genus
 # remove previously created lists or will mess up
 rm(list = grep("^x_", ls(), value=TRUE))
-for(genus in names(siglist)){
-  assign(genus, unname(siglist[[genus]]))
+for(Genus in names(siglist)){
+  assign(Genus, unname(siglist[[Genus]]))
 }
 
 # get an object containing all genes of interest
@@ -143,29 +140,29 @@ for (i in seq_along(siglist)){
 # add to dataframe
 res_ord$color <- genus_to_color[rownames(res_ord)]
 # if no color, remove genus label
-res_ord$genus[is.na(res_ord$color)] <- NA
+res_ord$Genus[is.na(res_ord$color)] <- NA
 # change NA genus to grey
 res_ord$color[is.na(res_ord$color)] <- "#808080"
 
 # get key value pairs for plotting
-colormap <- setNames(res_ord$color, res_ord$genus)
+colormap <- setNames(res_ord$color, res_ord$Genus)
 # finally get a list of the top 10 genes (based on highest p value) to label on the volcano plot
 tempdf <- res_ord[res_ord$target_gene == TRUE,]
 # sort the dataframe by logfold change
 sortdf <- tempdf[order(tempdf$log2FoldChange),]
 # get top 10 genes for disease
-low <- head(sortdf$tag, 10)
+low <- head(sortdf$locus_tag, 10)
 # negative top 10
-top <- tail(sortdf$tag, 10)
+top <- tail(sortdf$locus_tag, 10)
 # concatenate
 labgenes <- c(top, low)
 #combine species and gene
-res_ord$GeneInfo <- paste(res_ord$species,res_ord$gene)
+res_ord$GeneInfo <- paste(res_ord$SEQ_ID,res_ord$gene)
 res_ord$gene_name <- gsub(x = res_ord$gene, pattern = "_.", replacement = "") 
 
 #Create volcano plot
 overall_plot <- EnhancedVolcano(res_ord,
-  lab = ifelse(res_ord$tag %in% labgenes, paste(res_ord$species, res_ord$gene, sep=" "), ""),
+  lab = ifelse(res_ord$locus_tag %in% labgenes, paste(res_ord$SEQ_ID, res_ord$gene, sep=" "), ""),
   x = 'log2FoldChange',
   y = 'padj',
   FCcutoff = lfc,
@@ -180,12 +177,41 @@ overall_plot <- EnhancedVolcano(res_ord,
   drawConnectors = TRUE,
   max.overlaps = Inf,
   pointSize = (ifelse(rownames(res_ord) %in% all_genes == T, 3, 3)),
-  colAlpha = (ifelse(rownames(res_ord) %in% all_genes == F, 0.5, 0.75)),
+  colAlpha = (ifelse(rownames(res_ord) %in% all_genes == F, 0.5, 0.75))
 ) 
-pdf("volcano-HIvHUU.global.pdf", width=30, height=10)
+pdf("volcano-HIvHUU.red_prokka.pdf", width=15, height=10)
 overall_plot
 dev.off()
-system("~/.iterm2/imgcat ./volcano-HIvHUU.global.pdf")
+system("~/.iterm2/imgcat ./volcano-HIvHUU.red_prokka.pdf")
+
+#Create volcano plot
+res_sub <- res_ord %>% filter(gene == "kgp" | gene == "rgpB" | gene == "rgpA" | gene == "hagA" | gene == "fimA" | gene== "serC" | gene =="folD" | gene== "fhs" | gene =="sda" | gene == "susB" | gene == "kly" | gene == "eno" | gene == "hagA" | gene == "fimA" | gene == "oppA" | gene == "prtP"  | gene == "flaA" | gene == "flaB"| gene == "fliE" | gene == "cheX" | gene == "cheY" | gene == "hbpA" | gene == "hbpB" | gene == "troA" | gene =="bspA")
+color_viru <- setNames(res_sub$color, res_sub$Genus)
+
+res_ord %>% filter(gene =="bspA")
+
+overall_plot <- EnhancedVolcano(res_sub,
+  lab = res_sub$GeneInfo,
+  x = 'log2FoldChange',
+  y = 'padj',
+  FCcutoff = lfc,
+  pCutoff = pval,
+  colCustom = color_viru ,
+  title = "",
+  subtitle = "",
+  caption = "",
+  labSize = 1,
+  shape = 19,
+  legendPosition = 'right',
+  boxedLabels = TRUE,
+  drawConnectors = TRUE,
+  pointSize = (ifelse(rownames(res_sub) %in% all_genes == T, 3, 3)),
+  colAlpha = (ifelse(rownames(res_sub) %in% all_genes == F, 0.5, 0.75)),
+)
+pdf("volcano-HIvHUU.red_viru_prokka.pdf", width=15, height=10)
+overall_plot
+dev.off()
+system("~/.iterm2/imgcat ./volcano-HIvHUU.red_viru_prokka.pdf")
 ```
 # 2. Run DESeq HEU vs HUU
 ```R
@@ -196,17 +222,16 @@ library(EnhancedVolcano)
 library(dplyr)
 library(viridis)
 #load data
-setwd("/home/suzanne/rna_dohmain/11-perio/03-global-diff")
+setwd("/home/suzanne/rna_dohmain/11-perio/04-red-diff")
 metadata <- read.table("~/rna_dohmain/homd_map/map.txt", header=T, sep="\t")
 # remove dashes from health categories or it will mess up downstream processing
 metadata$aliquot_type <- sub("-", "", metadata$aliquot_type)
 row.names(metadata) <- metadata$sample_id
 # read in gene counts file
-genecounts <- read.table("../02-pgap/gene_counts.txt", header=T, sep="\t", row.names=1)
+genecounts <- read.csv("../../homd_map/red_counts.txt", header=T, sep="\t", row.names=1)
 # get rid of weird empty column in genecounts
 # genecounts <- genecounts[1:(length(genecounts)-1)]
 # fix sample names in gene counts so they match the metadata
-colnames(genecounts) <- gsub(x = names(genecounts), pattern = "\\.red", replacement = "") 
 colnames(genecounts) <- gsub(x = names(genecounts), pattern = "\\.", replacement = "-") 
 # filter metadata so that we only compare H to D
 submap <- metadata[metadata$hiv_status == "HUU" | metadata$hiv_status == "HEU",]
@@ -239,47 +264,41 @@ res <- results(se_star, alpha=0.05)
 res <- res[order(res$padj),]
 paste("number of genes with adjusted p value lower than 0.05: ", sum(res$padj < 0.05, na.rm=TRUE))
 summary(res)
-# [1] "number of genes with adjusted p value lower than 0.05:  208374"
-# out of 6585836 with nonzero total read count
+# [1] "number of genes with adjusted p value lower than 0.05:  37069"
+# out of 243544 with nonzero total read count
 # adjusted p-value < 0.05
-# LFC > 0 (up)       : 59755, 0.91%
-# LFC < 0 (down)     : 148619, 2.3%
+# LFC > 0 (up)       : 669, 0.27%
+# LFC < 0 (down)     : 36400, 15%
 # outliers [1]       : 0, 0%
-# low counts [2]     : 5617690, 85%
+# low counts [2]     : 174117, 71%
 # (mean count < 1)
-# [1] see 'cooksCutoff' argument of ?results
-# [2] see 'independentFiltering' argument of ?results
-
-# HUU is positive, HEU negative
+# HUU is positive, HEU cavity negative
 resLFC <- lfcShrink(se_star, coef="hiv_status_HUU_vs_HEU", type="apeglm")
 resLFC <- resLFC[order(resLFC$padj),]
 paste("number of genes with adjusted p value lower than 0.05: ", sum(resLFC$padj < 0.05, na.rm=TRUE))
 summary(resLFC)
-# [1] "number of genes with adjusted p value lower than 0.05:  208374"
-# out of 6585836 with nonzero total read count
+# [1] "number of genes with adjusted p value lower than 0.05:  37069"
+# out of 243544 with nonzero total read count
 # adjusted p-value < 0.1
-# LFC > 0 (up)       : 90515, 1.4%
-# LFC < 0 (down)     : 185339, 2.8%
+# LFC > 0 (up)       : 3784, 1.6%
+# LFC < 0 (down)     : 41893, 17%
 # outliers [1]       : 0, 0%
-# low counts [2]     : 5617690, 85%
+# low counts [2]     : 174117, 71%
 # (mean count < 1)
-# [1] see 'cooksCutoff' argument of ?results
-# [2] see 'independentFiltering' argument of ?results
-
-write.table(resLFC, file="deseq_results-HEUvHUU.txt", quote=F, sep="\t")
-save.image("deseq_results-HEUvHUU.RData")
+write.table(resLFC, file="deseq_results_red-HEUvHUU.prokka.txt", quote=F, sep="\t")
+save.image("deseq_results_red-HEUvHUU.prokka.RData")
 ```
 Valcona Plot
 ```R
-load("deseq_results-HEUvHUU.RData")
+load("deseq_results_red-HEUvHUU.prokka.RData")
 # add in annotations
-homd <- read.csv("../02-pgap/gene_annots.txt", header=T, sep="\t", quote="")
+homd <- read.table("../../homd_map/red_annots.txt", header=T, sep="\t", quote="")
 # filter by locus tag 
 resdf <- as.data.frame(resLFC)
-ann <- homd[homd$tag %in% rownames(resdf),]
+ann <- homd[homd$locus_tag %in% rownames(resdf),]
 
 # reorder
-rownames(ann) <- ann$tag
+rownames(ann) <- ann$locus_tag
 sortrow <- rownames(ann)[order(match(rownames(resdf), rownames(ann)))]
 
 resdf <- resdf[sortrow, , drop=FALSE]
@@ -295,21 +314,19 @@ pval = 0.05
 
 # get list of loci that are significant and have a log FC of 2+
 sigloc <- resdf %>% filter(padj <= pval) %>% filter(log2FoldChange >= lfc | log2FoldChange <= -lfc) 
+
 # get new dataframe with concatenated genus species and locus id
-sigsp <- paste("x", sigloc$genus, sep="_")
-sigdf <- as.data.frame(cbind(sigloc$tag, sigsp))
+sigsp <- paste("x", sigloc$Genus, sep="_")
+sigdf <- as.data.frame(cbind(sigloc$locus_tag, sigsp))
 
 # split the dataframe as a list by genus
 siglist <- split(sigdf$V1, sigdf$sigsp)
 
-# remove any lists (i.e., genera) with fewer than three hits
-siglist <- Filter(function(x) length(x) >=3, siglist)
-
 # create object for each genus
 # remove previously created lists or will mess up
 rm(list = grep("^x_", ls(), value=TRUE))
-for(genus in names(siglist)){
-  assign(genus, unname(siglist[[genus]]))
+for(Genus in names(siglist)){
+  assign(Genus, unname(siglist[[Genus]]))
 }
 
 # get an object containing all genes of interest
@@ -333,29 +350,29 @@ for (i in seq_along(siglist)){
 # add to dataframe
 res_ord$color <- genus_to_color[rownames(res_ord)]
 # if no color, remove genus label
-res_ord$genus[is.na(res_ord$color)] <- NA
+res_ord$Genus[is.na(res_ord$color)] <- NA
 # change NA genus to grey
 res_ord$color[is.na(res_ord$color)] <- "#808080"
 
 # get key value pairs for plotting
-colormap <- setNames(res_ord$color, res_ord$genus)
-# finally get a list of the top 10 genes (based on highest p value) to label on the volcano plot
+colormap <- setNames(res_ord$color, res_ord$Genus)
+# finally get a list of the top 10 genes (based on HEUghest p value) to label on the volcano plot
 tempdf <- res_ord[res_ord$target_gene == TRUE,]
 # sort the dataframe by logfold change
 sortdf <- tempdf[order(tempdf$log2FoldChange),]
 # get top 10 genes for disease
-low <- head(sortdf$tag, 10)
+low <- head(sortdf$locus_tag, 10)
 # negative top 10
-top <- tail(sortdf$tag, 10)
+top <- tail(sortdf$locus_tag, 10)
 # concatenate
 labgenes <- c(top, low)
 #combine species and gene
-res_ord$GeneInfo <- paste(res_ord$species,res_ord$gene)
+res_ord$GeneInfo <- paste(res_ord$SEQ_ID,res_ord$gene)
 res_ord$gene_name <- gsub(x = res_ord$gene, pattern = "_.", replacement = "") 
 
 #Create volcano plot
 overall_plot <- EnhancedVolcano(res_ord,
-  lab = ifelse(res_ord$tag %in% labgenes, paste(res_ord$species, res_ord$gene, sep=" "), ""),
+  lab = ifelse(res_ord$locus_tag %in% labgenes, paste(res_ord$SEQ_ID, res_ord$gene, sep=" "), ""),
   x = 'log2FoldChange',
   y = 'padj',
   FCcutoff = lfc,
@@ -370,12 +387,41 @@ overall_plot <- EnhancedVolcano(res_ord,
   drawConnectors = TRUE,
   max.overlaps = Inf,
   pointSize = (ifelse(rownames(res_ord) %in% all_genes == T, 3, 3)),
-  colAlpha = (ifelse(rownames(res_ord) %in% all_genes == F, 0.5, 0.75)),
+  colAlpha = (ifelse(rownames(res_ord) %in% all_genes == F, 0.5, 0.75))
 ) 
-pdf("volcano-HEUvHUU.global.pdf", width=30, height=10)
+pdf("volcano-HEUvHUU.red_prokka.pdf", width=15, height=10)
 overall_plot
 dev.off()
-system("~/.iterm2/imgcat ./volcano-HEUvHUU.global.pdf")
+system("~/.iterm2/imgcat ./volcano-HEUvHUU.red_prokka.pdf")
+
+#Create volcano plot
+res_sub <- res_ord %>% filter(gene == "kgp" | gene == "rgpB" | gene == "rgpA" | gene == "hagA" | gene == "fimA" | gene== "serC" | gene =="folD" | gene== "fhs" | gene =="sda" | gene == "susB" | gene == "kly" | gene == "eno" | gene == "hagA" | gene == "fimA" | gene == "oppA" | gene == "prtP"  | gene == "flaA" | gene == "flaB"| gene == "fliE" | gene == "cheX" | gene == "cheY" | gene == "hbpA" | gene == "hbpB" | gene == "troA" | gene =="bspA")
+color_viru <- setNames(res_sub$color, res_sub$Genus)
+
+res_ord %>% filter(gene =="bspA")
+
+overall_plot <- EnhancedVolcano(res_sub,
+  lab = res_sub$GeneInfo,
+  x = 'log2FoldChange',
+  y = 'padj',
+  FCcutoff = lfc,
+  pCutoff = pval,
+  colCustom = color_viru ,
+  title = "",
+  subtitle = "",
+  caption = "",
+  labSize = 1,
+  shape = 19,
+  legendPosition = 'right',
+  boxedLabels = TRUE,
+  drawConnectors = TRUE,
+  pointSize = (ifelse(rownames(res_sub) %in% all_genes == T, 3, 3)),
+  colAlpha = (ifelse(rownames(res_sub) %in% all_genes == F, 0.5, 0.75)),
+)
+pdf("volcano-HEUvHUU.red_viru_prokka.pdf", width=15, height=10)
+overall_plot
+dev.off()
+system("~/.iterm2/imgcat ./volcano-HEUvHUU.red_viru_prokka.pdf")
 ```
 # 3. Run DESeq HI vs HEU
 ```R
@@ -386,17 +432,16 @@ library(EnhancedVolcano)
 library(dplyr)
 library(viridis)
 #load data
-setwd("/home/suzanne/rna_dohmain/11-perio/03-global-diff")
+setwd("/home/suzanne/rna_dohmain/11-perio/04-red-diff")
 metadata <- read.table("~/rna_dohmain/homd_map/map.txt", header=T, sep="\t")
 # remove dashes from health categories or it will mess up downstream processing
 metadata$aliquot_type <- sub("-", "", metadata$aliquot_type)
 row.names(metadata) <- metadata$sample_id
 # read in gene counts file
-genecounts <- read.table("../02-pgap/gene_counts.txt", header=T, sep="\t", row.names=1)
+genecounts <- read.csv("../../homd_map/red_counts.txt", header=T, sep="\t", row.names=1)
 # get rid of weird empty column in genecounts
 # genecounts <- genecounts[1:(length(genecounts)-1)]
 # fix sample names in gene counts so they match the metadata
-colnames(genecounts) <- gsub(x = names(genecounts), pattern = "\\.red", replacement = "") 
 colnames(genecounts) <- gsub(x = names(genecounts), pattern = "\\.", replacement = "-") 
 # filter metadata so that we only compare H to D
 submap <- metadata[metadata$hiv_status == "HEU" | metadata$hiv_status == "HI",]
@@ -429,46 +474,41 @@ res <- results(se_star, alpha=0.05)
 res <- res[order(res$padj),]
 paste("number of genes with adjusted p value lower than 0.05: ", sum(res$padj < 0.05, na.rm=TRUE))
 summary(res)
-# [1] "number of genes with adjusted p value lower than 0.05:  196687"
-# out of 6585836 with nonzero total read count
+# [1] "number of genes with adjusted p value lower than 0.05:  23731"
+# out of 243544 with nonzero total read count
 # adjusted p-value < 0.05
-# LFC > 0 (up)       : 130968, 2%
-# LFC < 0 (down)     : 65719, 1%
+# LFC > 0 (up)       : 6789, 2.8%
+# LFC < 0 (down)     : 16942, 7%
 # outliers [1]       : 0, 0%
-# low counts [2]     : 5482201, 83%
+# low counts [2]     : 149456, 61%
 # (mean count < 1)
-# [1] see 'cooksCutoff' argument of ?results
-# [2] see 'independentFiltering' argument of ?results
-
-# HEU is positive, HI negative
+# HEU is positive, HEU cavity negative
 resLFC <- lfcShrink(se_star, coef="hiv_status_HEU_vs_HI", type="apeglm")
 resLFC <- resLFC[order(resLFC$padj),]
 paste("number of genes with adjusted p value lower than 0.05: ", sum(resLFC$padj < 0.05, na.rm=TRUE))
 summary(resLFC)
-# [1] "number of genes with adjusted p value lower than 0.05:  196687"
-# out of 6585836 with nonzero total read count
+# [1] "number of genes with adjusted p value lower than 0.05:  24267"
+# out of 243544 with nonzero total read count
 # adjusted p-value < 0.1
-# LFC > 0 (up)       : 158949, 2.4%
-# LFC < 0 (down)     : 95800, 1.5%
+# LFC > 0 (up)       : 9075, 3.7%
+# LFC < 0 (down)     : 23376, 9.6%
 # outliers [1]       : 0, 0%
-# low counts [2]     : 5482201, 83%
+# low counts [2]     : 155400, 64%
 # (mean count < 1)
-# [1] see 'cooksCutoff' argument of ?results
-# [2] see 'independentFiltering' argument of ?results
-write.table(resLFC, file="deseq_results-HIvHEU.txt", quote=F, sep="\t")
-save.image("deseq_results-HIvHEU.RData")
+write.table(resLFC, file="deseq_results_red-HIvHEU.prokka.txt", quote=F, sep="\t")
+save.image("deseq_results_red-HIvHEU.prokka.RData")
 ```
 Valcona Plot
 ```R
-load("deseq_results-HIvHEU.RData")
+load("deseq_results_red-HIvHEU.prokka.RData")
 # add in annotations
-homd <- read.csv("../02-pgap/gene_annots.txt", header=T, sep="\t", quote="")
+homd <- read.table("../../homd_map/red_annots.txt", header=T, sep="\t", quote="")
 # filter by locus tag 
 resdf <- as.data.frame(resLFC)
-ann <- homd[homd$tag %in% rownames(resdf),]
+ann <- homd[homd$locus_tag %in% rownames(resdf),]
 
 # reorder
-rownames(ann) <- ann$tag
+rownames(ann) <- ann$locus_tag
 sortrow <- rownames(ann)[order(match(rownames(resdf), rownames(ann)))]
 
 resdf <- resdf[sortrow, , drop=FALSE]
@@ -484,21 +524,19 @@ pval = 0.05
 
 # get list of loci that are significant and have a log FC of 2+
 sigloc <- resdf %>% filter(padj <= pval) %>% filter(log2FoldChange >= lfc | log2FoldChange <= -lfc) 
+
 # get new dataframe with concatenated genus species and locus id
-sigsp <- paste("x", sigloc$genus, sep="_")
-sigdf <- as.data.frame(cbind(sigloc$tag, sigsp))
+sigsp <- paste("x", sigloc$Genus, sep="_")
+sigdf <- as.data.frame(cbind(sigloc$locus_tag, sigsp))
 
 # split the dataframe as a list by genus
 siglist <- split(sigdf$V1, sigdf$sigsp)
 
-# remove any lists (i.e., genera) with fewer than three hits
-siglist <- Filter(function(x) length(x) >=3, siglist)
-
 # create object for each genus
 # remove previously created lists or will mess up
 rm(list = grep("^x_", ls(), value=TRUE))
-for(genus in names(siglist)){
-  assign(genus, unname(siglist[[genus]]))
+for(Genus in names(siglist)){
+  assign(Genus, unname(siglist[[Genus]]))
 }
 
 # get an object containing all genes of interest
@@ -522,29 +560,29 @@ for (i in seq_along(siglist)){
 # add to dataframe
 res_ord$color <- genus_to_color[rownames(res_ord)]
 # if no color, remove genus label
-res_ord$genus[is.na(res_ord$color)] <- NA
+res_ord$Genus[is.na(res_ord$color)] <- NA
 # change NA genus to grey
 res_ord$color[is.na(res_ord$color)] <- "#808080"
 
 # get key value pairs for plotting
-colormap <- setNames(res_ord$color, res_ord$genus)
+colormap <- setNames(res_ord$color, res_ord$Genus)
 # finally get a list of the top 10 genes (based on highest p value) to label on the volcano plot
 tempdf <- res_ord[res_ord$target_gene == TRUE,]
 # sort the dataframe by logfold change
 sortdf <- tempdf[order(tempdf$log2FoldChange),]
 # get top 10 genes for disease
-low <- head(sortdf$tag, 10)
+low <- head(sortdf$locus_tag, 10)
 # negative top 10
-top <- tail(sortdf$tag, 10)
+top <- tail(sortdf$locus_tag, 10)
 # concatenate
 labgenes <- c(top, low)
 #combine species and gene
-res_ord$GeneInfo <- paste(res_ord$species,res_ord$gene)
+res_ord$GeneInfo <- paste(res_ord$SEQ_ID,res_ord$gene)
 res_ord$gene_name <- gsub(x = res_ord$gene, pattern = "_.", replacement = "") 
 
 #Create volcano plot
 overall_plot <- EnhancedVolcano(res_ord,
-  lab = ifelse(res_ord$tag %in% labgenes, paste(res_ord$species, res_ord$gene, sep=" "), ""),
+  lab = ifelse(res_ord$locus_tag %in% labgenes, paste(res_ord$SEQ_ID, res_ord$gene, sep=" "), ""),
   x = 'log2FoldChange',
   y = 'padj',
   FCcutoff = lfc,
@@ -559,133 +597,39 @@ overall_plot <- EnhancedVolcano(res_ord,
   drawConnectors = TRUE,
   max.overlaps = Inf,
   pointSize = (ifelse(rownames(res_ord) %in% all_genes == T, 3, 3)),
-  colAlpha = (ifelse(rownames(res_ord) %in% all_genes == F, 0.5, 0.75)),
+  colAlpha = (ifelse(rownames(res_ord) %in% all_genes == F, 0.5, 0.75))
 ) 
-pdf("volcano-HIvHEU.global.pdf", width=30, height=10)
+pdf("volcano-HIvHEU.red_prokka.pdf", width=15, height=10)
 overall_plot
 dev.off()
-system("~/.iterm2/imgcat ./volcano-HIvHEU.global.pdf")
+system("~/.iterm2/imgcat ./volcano-HIvHEU.red_prokka.pdf")
+
+#Create volcano plot
+res_sub <- res_ord %>% filter(gene == "kgp" | gene == "rgpB" | gene == "rgpA" | gene == "hagA" | gene == "fimA" | gene== "serC" | gene =="folD" | gene== "fhs" | gene =="sda" | gene == "susB" | gene == "kly" | gene == "eno" | gene == "hagA" | gene == "fimA" | gene == "oppA" | gene == "prtP"  | gene == "flaA" | gene == "flaB"| gene == "fliE" | gene == "cheX" | gene == "cheY" | gene == "hbpA" | gene == "hbpB" | gene == "troA" | gene =="bspA")
+color_viru <- setNames(res_sub$color, res_sub$Genus)
+
+res_ord %>% filter(gene =="bspA")
+
+overall_plot <- EnhancedVolcano(res_sub,
+  lab = res_sub$GeneInfo,
+  x = 'log2FoldChange',
+  y = 'padj',
+  FCcutoff = lfc,
+  pCutoff = pval,
+  colCustom = color_viru ,
+  title = "",
+  subtitle = "",
+  caption = "",
+  labSize = 1,
+  shape = 19,
+  legendPosition = 'right',
+  boxedLabels = TRUE,
+  drawConnectors = TRUE,
+  pointSize = (ifelse(rownames(res_sub) %in% all_genes == T, 3, 3)),
+  colAlpha = (ifelse(rownames(res_sub) %in% all_genes == F, 0.5, 0.75)),
+)
+pdf("volcano-HIvHEU.red_viru_prokka.pdf", width=15, height=10)
+overall_plot
+dev.off()
+system("~/.iterm2/imgcat ./volcano-HIvHEU.red_viru_prokka.pdf")
 ```
-# 4. Proportion of aligned reads that belong to the red complex
-```sh
-python3 species_distro.py > species_distro.log
-python3 species_distro_average.py > species_distro_average.log
-```
-Make plots
-```R
-library(ggplot2)
-library(tidyverse)
-library(reshape2)
-library(dplyr)
-library(ggpubr)
-
-#load data
-setwd("/home/suzanne/rna_dohmain/11-perio/03-global-diff")
-metadata <- read.table("~/rna_dohmain/homd_map/map.txt", header=T, sep="\t")
-counts <- read.csv("species_reads.txt", header=T,sep = "\t")
-counts$sample <- gsub(x = counts$sample, pattern = "\\.red", replacement = "") 
-counts$sample <- gsub(x = counts$sample, pattern = "\\.", replacement = "-") 
-data <- melt(counts)
-data <- left_join(data, metadata, by = join_by(sample ==  sample_id))
-data$genus <- gsub(x = data$variable, pattern = "_.*", replacement = "")
-
-pdf("rna_reads.pdf", width =15, heigh =10)
-ggplot(data)+
-  geom_bar(aes(x=sample, y=value,fill=genus),stat="identity", position="stack")+
-  facet_grid(~ tooth_health, switch = "x", scales = "free_x") +
-  theme_minimal()+
-  ggplot2::theme(axis.text.x = element_text(color = "black", size = 4, angle = 90, hjust = .5, vjust = .5, face = "plain"),
-      axis.text.y = element_text(color = "black", size = 12, angle = 0, hjust = 1, vjust = 0, face = "plain"),
-      legend.text = element_text(size = 7),legend.title = element_text(size = 10))
-dev.off()
-system("~/.iterm2/imgcat ./rna_reads.pdf")
-
-# red complex plot
-sub_data <- data[data$variable == "Porphyromonas_gingivalis" | data$variable == "Treponema_denticola" | data$variable == "Tannerella_forsythia",]
-pdf("red_rna_reads.pdf", width =15, heigh =10)
-ggplot(sub_data)+
-  geom_bar(aes(x=sample, y=value,fill=variable),stat="identity", position="stack")+
-  facet_grid(~ hiv_status, switch = "x", scales = "free_x") +
-  theme_minimal()+
-  ggplot2::theme(axis.text.x = element_text(color = "black", size = 4, angle = 90, hjust = .5, vjust = .5, face = "plain"),
-      axis.text.y = element_text(color = "black", size = 12, angle = 0, hjust = 1, vjust = 0, face = "plain"),
-      legend.text = element_text(size = 7),legend.title = element_text(size = 10))
-dev.off()
-system("~/.iterm2/imgcat ./red_rna_reads.pdf")
-mean(sub_data$value)
-
-# Trep denticola
-sub_data <- data[data$variable == "Treponema_denticola",]
-pdf("tdent_rna_reads.pdf", width =15, heigh =10)
-ggplot(sub_data)+
-  geom_bar(aes(x=sample, y=value,fill=variable),stat="identity", position="stack")+
-  facet_grid(~ hiv_status, switch = "x", scales = "free_x") +
-  theme_minimal()+
-  ggplot2::theme(axis.text.x = element_text(color = "black", size = 4, angle = 90, hjust = .5, vjust = .5, face = "plain"),
-      axis.text.y = element_text(color = "black", size = 12, angle = 0, hjust = 1, vjust = 0, face = "plain"),
-      legend.text = element_text(size = 7),legend.title = element_text(size = 10))
-dev.off()
-system("~/.iterm2/imgcat ./tdent_rna_reads.pdf")
-pdf("tdent_rna_reads.hist.pdf", width =15, heigh =10)
-ggplot(sub_data, aes(x = value)) +
-  geom_histogram(binwidth = 0.1, fill = "blue", color = "black", aes(y = ..count..)) +
-  labs(title = "Histogram of Values", x = "Value", y = "Frequency") +
-  theme_minimal()
-dev.off()
-system("~/.iterm2/imgcat ./tdent_rna_reads.hist.pdf")
-mean(sub_data$value)
-# Porphyromonas_gingivalis
-sub_data <- data[data$variable == "Porphyromonas_gingivalis",]
-pdf("pging_rna_reads.pdf", width =15, heigh =10)
-ggplot(sub_data)+
-  geom_bar(aes(x=sample, y=value,fill=variable),stat="identity", position="stack")+
-  facet_grid(~ hiv_status, switch = "x", scales = "free_x") +
-  theme_minimal()+
-  ggplot2::theme(axis.text.x = element_text(color = "black", size = 4, angle = 90, hjust = .5, vjust = .5, face = "plain"),
-      axis.text.y = element_text(color = "black", size = 12, angle = 0, hjust = 1, vjust = 0, face = "plain"),
-      legend.text = element_text(size = 7),legend.title = element_text(size = 10))
-dev.off()
-system("~/.iterm2/imgcat ./pging_rna_reads.pdf")
-pdf("pging_rna_reads.hist.pdf", width =15, heigh =10)
-ggplot(sub_data, aes(x = value)) +
-  geom_histogram(binwidth = 0.1, fill = "blue", color = "black", aes(y = ..count..)) +
-  labs(title = "Histogram of Values", x = "Value", y = "Frequency") +
-  theme_minimal()
-dev.off()
-system("~/.iterm2/imgcat ./pging_rna_reads.hist.pdf")
-mean(sub_data$value)
-# Trep denticola
-sub_data <- data[data$variable == "Tannerella_forsythia",]
-pdf("tfors_rna_reads.pdf", width =15, heigh =10)
-ggplot(sub_data)+
-  geom_bar(aes(x=sample, y=value,fill=variable),stat="identity", position="stack")+
-  facet_grid(~ hiv_status, switch = "x", scales = "free_x") +
-  theme_minimal()+
-  ggplot2::theme(axis.text.x = element_text(color = "black", size = 4, angle = 90, hjust = .5, vjust = .5, face = "plain"),
-      axis.text.y = element_text(color = "black", size = 12, angle = 0, hjust = 1, vjust = 0, face = "plain"),
-      legend.text = element_text(size = 7),legend.title = element_text(size = 10))
-dev.off()
-system("~/.iterm2/imgcat ./tfors_rna_reads.pdf")
-pdf("tfors_rna_reads.hist.pdf", width =15, heigh =10)
-ggplot(sub_data, aes(x = value)) +
-  geom_histogram(binwidth = 0.1, fill = "blue", color = "black", aes(y = ..count..)) +
-  labs(title = "Histogram of Values", x = "Value", y = "Frequency") +
-  theme_minimal()
-dev.off()
-system("~/.iterm2/imgcat ./tfors_rna_reads.hist.pdf")
-mean(sub_data$value)
-
-# compare across the thuree groups
-sub_data <- data[data$variable == "Porphyromonas_gingivalis" | data$variable == "Treponema_denticola" | data$variable == "Tannerella_forsythia",]
-hiv_stat <- c("HI", "HEU", "HUU")
-hivCols <- c("#8213A0", "#FA78FA", "#40A0FA")
-pdf("red_rna_prop.pdf")
-ggplot(sub_data, aes(x=factor(hiv_status, levels=hiv_stat),y=value))+
-  geom_pwc(label = "{p.adj.format}{p.adj.signif}", hide.ns =FALSE, p.adjust.method = "fdr") + #adds signficance between the categories
-  geom_boxplot() +
-  # geom_jitter(aes(color=month), shape=16, position=position_jitter(0.2), size=2.5)+
-  # scale_color_manual(values = month_colors)+ #color dots by sample
-  # labs(x ="Bimonthly", y = "CLR Abundance")+
-  theme_classic()
-dev.off()
-system("~/.iterm2/imgcat ./red_rna_prop.pdf")

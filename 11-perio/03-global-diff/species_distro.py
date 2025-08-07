@@ -4,7 +4,7 @@ import numpy as np  # For handling NaN values
 # Step 1: Read the read counts file (assuming it's a tabular format)
 read_counts_file = '~/rna_dohmain/11-perio/02-pgap/gene_counts.txt'
 read_counts_df = pd.read_csv(read_counts_file, sep='\t', index_col=None, header = 0)  # Assuming sample IDs are in the first column
-read_counts_df = read_counts_df.iloc[:, :-1]  # Remove last column if it's not needed
+# read_counts_df = read_counts_df.iloc[:, :-1]  # Remove last column if it's not needed
 read_counts_df.set_index('Geneid', inplace=True)
 read_counts_df.index.name = None  # Remove the name of the index
 

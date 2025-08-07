@@ -378,6 +378,19 @@ ggplot() + geom_bar(data = gene.annot, aes(x = variable, y = value), position = 
   theme_minimal()
 dev.off()
 system("~/.iterm2/imgcat ./SEQF3203.RNA.sample.pdf")
+
+# select columns for a certain genome 
+gene.sub <- genecounts[grep("SEQF3220", row.names(genecounts), invert = FALSE, ignore.case = TRUE),]
+gene.df <- melt(gene.sub)
+gene.annot <- left_join(gene.df, metadata, by = c("variable" = "sample_id"))
+gene.annot $hiv_status <- factor(gene.annot$hiv_status, levels = c("HUU", "HEU", "HI"))
+
+pdf("SEQF3220.RNA.sample.pdf")
+ggplot() + geom_bar(data = gene.annot, aes(x = variable, y = value), position = "dodge", stat = "identity")+
+  facet_grid(~ hiv_status +visit_num, switch = "x", scales = "free_x")+
+  theme_minimal()
+dev.off()
+system("~/.iterm2/imgcat ./SEQF3220.RNA.sample.pdf")
 ```
 ## 2.2 Genome Cluster for P. ginigivalis
 ```R
@@ -553,7 +566,6 @@ sig_average_baseMean_sub_virus <- average_pg %>%
 
 ddata <- dendro_data(hc)
 tip_labels <- ddata$labels$label
-
 heatmap_plot <- ggplot(mapping = aes(x = metric, y = factor(genome, levels=tip_labels))) +
   geom_tile(data = sig_average_log2_sub, aes(fill = value), color ="black") +
   scale_fill_distiller(type = "seq", palette = "GnBu", guide = guide_colorbar(title = "Average log fold change", title.position = "top")) +

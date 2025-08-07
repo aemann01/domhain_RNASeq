@@ -127,7 +127,8 @@ library(ggpubr)
 library(rstatix)
 library(viridis)
 library(rstatix)
-
+library(effsize)
+librry(lsr)
 #load data
 setwd("/home/suzanne/rna_dohmain/11-perio/07-inflammation")
 meta <- read.csv("~/long_oral/map_domhain_long_2.txt", sep="\t", header=T)
@@ -142,17 +143,28 @@ meta$total_Ca_mg <- as.numeric(meta$total_Ca_mg)
 meta$pH <- as.numeric(meta$pH)
 meta$flow_rate <- as.numeric(meta$flow_rate)
 meta$cd4_count <- as.numeric(meta$cd4_count)
+meta$Calculus_index <- as.numeric(meta$Calculus_index)
+meta$Gingival_inflammation_Score <- as.numeric(meta$Gingival_inflammation_Score)
 
 cor.test(meta$pH, meta$Oral_Hygiene_Score, method = "spearman")
 cor.test(meta$flow_rate, meta$Oral_Hygiene_Score, method = "spearman")
-cor.test(meta$total_Ca_mg, meta$Oral_Hygiene_Score, method = "spearman")
-cor.test(meta$total_Ca_mg, meta$Oral_Hygiene_Score, method = "spearman")
+cor.test(meta$total_Ca_mg, meta$Oral_Hygiene_Score, method = "pearson")
+cor.test(meta$total_vitA_RAE_mcg, meta$Oral_Hygiene_Score, method = "pearson")
+cor.test(meta$total_vitC_mg, meta$Oral_Hygiene_Score, method = "pearson")
+cor.test(meta$total_carbohydrates_g, meta$Oral_Hygiene_Score, method = "spearman")
+cor.test(meta$Calculus_index, meta$Gingival_inflammation_Score, method = "pearson")
+
 cor.test(meta$cd4_count, meta$Oral_Hygiene_Score, method = "spearman")
 
-wilcox_test(meta, total_Ca_mg ~ hiv_status) %>%
+wilcox_test(meta, Oral_Hygiene_Score ~ hiv_status) %>%
   adjust_pvalue(method = "BH") %>%
   add_significance()    
-aggregate(total_Ca_mg ~ hiv_status, data = meta, FUN = mean, na.rm = TRUE)
+aggregate(Oral_Hygiene_Score ~ hiv_status, data = meta, FUN = mean, na.rm = TRUE)
+submap <- meta[meta$hiv_status == "HEU",]
+
+cohen.d(Oral_Hygiene_Score ~ hiv_status, data = submap)
+submap <- meta[meta$hiv_status == "HUU" | meta$hiv_status == "HI",]
+cohen.d(Oral_Hygiene_Score ~ hiv_status, data = submap)
 
 wilcox_test(meta, total_Ca_mg ~ hiv_status) %>%
   add_significance()
@@ -243,10 +255,11 @@ ggscatter(meta, x = "Oral_Hygiene_Score", y = "cd4_count",
 dev.off()
 system("~/.iterm2/imgcat ./cd4voral.corr.long.pdf")
 
+meta <- meta[meta$total_Ca_mg < 2000, ]
 meta_unique$hiv_status <- factor(meta_unique$hiv_status, levels = hiv_stat)
 
 pdf("CAvoral.corr.long.pdf")
-ggscatter(meta_unique, x = "Oral_Hygiene_Score", y = "total_Ca_mg",
+ggscatter(meta, x = "Oral_Hygiene_Score", y = "total_Ca_mg",
    color = "hiv_status", shape = 21, size = 3, 
    add = "reg.line",  
    add.params = list(color = "black", fill = "darkgray"), 
@@ -257,6 +270,21 @@ ggscatter(meta_unique, x = "Oral_Hygiene_Score", y = "total_Ca_mg",
   scale_color_manual(values = hivCols)   
 dev.off()
 system("~/.iterm2/imgcat ./CAvoral.corr.long.pdf")
+
+pdf("gingivalVcalculus.corr.long.pdf",)
+ggscatter(meta, x = "Calculus_index", y = "Gingival_inflammation_Score",
+   color = "hiv_status", shape = 21, size = 3, 
+   add = "reg.line",  
+   add.params = list(color = "black", fill = "darkgray"), 
+   conf.int = TRUE, 
+   cor.coef = TRUE, 
+   cor.coeff.args = list(method = "pearson", label.x = 1.5, label.sep = ",", size=5),
+   point = "FALSE"
+   )+
+  geom_jitter(aes(color = hiv_status), width = 0.1, height = 0.1, size = 2, shape = 21, stroke =1) +  # Add jitter here
+  scale_color_manual(values = hivCols)   
+dev.off()
+system("~/.iterm2/imgcat ./gingivalVcalculus.corr.long.pdf")
 
 
 cor.test(meta$cd4_count, meta$Oral_Hygiene_Score, method = "spearman") # sig
@@ -285,7 +313,6 @@ ggplot(meta, aes(x=factor(hiv_status, levels=hiv_stat),y=cd4_count))+
 dev.off()
 system("~/.iterm2/imgcat ./cd4_count.long.pdf")
 
-meta$hiv_status <- factor(meta$hiv_status, levels=c("HI", "HEU", "HUU"))
 
 meta$hiv_status <- factor(meta$hiv_status, levels=c("HI", "HEU", "HUU"))
 meta$Oral_Hygiene_Score_Remark <- factor(meta$Oral_Hygiene_Score_Remark, levels=c("Good", "Fair", "Poor"))
@@ -295,7 +322,7 @@ ggplot(meta, aes(x = hiv_status, y = as.numeric(Oral_Hygiene_Score))) +
     scale_color_manual(values = c("Good" = "#006164", "Fair" = "#EDA247", "Poor" = "#DB4325")) +
     theme_bw() +
     # geom_hline(yintercept = c(1.2, 3.1), linetype = "dashed") +
-    geom_pwc(label = "{p.format}{p.signif}", hide.ns = TRUE, p.adjust.method = "fdr") +
+    geom_pwc(label = "{p.adj.format}{p.adj.signif}", hide.ns = TRUE, p.adjust.method = "fdr") + # Add pairwise comparisons
     stat_summary(geom = "point", fun = "mean", size = 5, shape = 23, fill = "red") +
     ylab("Simplified Oral Hygiene Score") +
     xlab("HIV status") +
@@ -598,6 +625,7 @@ library(ggside)
 setwd("/home/suzanne/rna_dohmain/11-perio/07-inflammation")
 metadata <- read.table("~/rna_dohmain/homd_map/map.txt", header=T, sep="\t")
 counts <- read.csv("../03-global-diff/species_reads.txt", header=T,sep = "\t")
+hivCols <- c("#8213A0", "#FA78FA", "#40A0FA")
 counts$sample <- gsub(x = counts$sample, pattern = "\\.red", replacement = "") 
 counts$sample <- gsub(x = counts$sample, pattern = "\\.", replacement = "-") 
 data <- melt(counts)
@@ -605,25 +633,81 @@ data <- left_join(data, metadata, by = join_by(sample ==  sample_id))
 data$genus <- gsub(x = data$variable, pattern = "_.*", replacement = "")
 
 sub_data <- data[data$variable == "Porphyromonas_gingivalis" | data$variable == "Treponema_denticola" | data$variable == "Tannerella_forsythia",]
-cor.test(sub_data$value*100, sub_data$oral_hygiene_score, method = "pearson") #not sig
+sub_data %>%
+  group_by(variable) %>%
+  summarise(
+    cor_value = cor(value, oral_hygiene_score, method = "pearson"),  # Compute correlation directly
+    p_value = cor.test(value, oral_hygiene_score, method = "pearson")$p.value,  # Extract p-value
+    .groups = 'drop'
+  )
+cor.test(sub_data$value/100, sub_data$oral_hygiene_score, method = "pearson") #not sig
+ords <- c("HI", "HEU", "HUU")
+sub_data$hiv_status <- factor(sub_data$hiv_status, levels = ords)
+sub_data$abundance <- sub_data$value/100
+sub_data$variable <- factor(sub_data$variable, levels = c("Porphyromonas_gingivalis", "Treponema_denticola", "Tannerella_forsythia"))
+
+pdf("redvoral.corr.species.pdf", width =20)
+ggscatter(sub_data, x = "oral_hygiene_score", y = "abundance",
+   color = "hiv_status", shape = 21, size = 3, stroke =2, 
+   add = "reg.line",  
+   add.params = list(color = "black", fill = "darkgray"), 
+   conf.int = TRUE, 
+   cor.coef = TRUE, 
+   cor.coeff.args = list(method = "pearson", label.x = 3, label.sep = ",", size=5)
+   )+
+  scale_color_manual(values = hivCols)   +
+  facet_wrap(~variable, scales = "free") +
+  labs(
+    x = "Simplified Oral Hygiene Score",
+    y = "Relative Abundance of Transcripts" 
+  )
+dev.off()
+system("~/.iterm2/imgcat ./redvoral.corr.species.pdf")
+
+# correlate between species
+p_data <- sub_data[sub_data$variable == "Porphyromonas_gingivalis",]
+p_data <- p_data %>%
+  dplyr::rename(p_ging = abundance)
+td_data <- sub_data[sub_data$variable == "Treponema_denticola",]
+td_data <- td_data %>%
+  dplyr::rename(t_dent = abundance)
+tf_data <- sub_data[sub_data$variable == "Tannerella_forsythia",]
+tf_data <- tf_data %>%
+  dplyr::rename(t_for = abundance)
+comb<-rbind(p_data, td_data, tf_data)
+cor.test(red_mean3$p_ging, red_mean3$t_dent, method = "pearson") #not sig
 
 #average by species
 red_mean3 <- sub_data %>% 
   group_by(sample, hiv_status, oral_hygiene_score, gingival_inflammation_score, cd4_count, calculus_index) %>% 
-  summarise(Total = sum(value, na.rm = TRUE))
-cor.test(log(red_mean3$Total), red_mean3$oral_hygiene_score, method = "pearson") #not sig
-cor.test(1 / (red_mean3$Total + 1), red_mean3$oral_hygiene_score, method = "pearson")
-cor.test(red_mean3$Total, scale(red_mean3$oral_hygiene_score, center = TRUE, scale = TRUE), method = "sp")
+  summarise(Total = sum(log10(value/100+0.0001), na.rm = TRUE))
+cor.test(red_mean3$Total, red_mean3$oral_hygiene_score, method = "pearson") #not sig
 
-red_mean3$rounded <- round(as.numeric(red_mean3$Total), 2)
+test <- sub_data %>% 
+  group_by(sample, hiv_status, oral_hygiene_score, oral_hygiene_score_remark, gingival_inflammation_score, cd4_count, calculus_index) %>% 
+  summarise(Total = sum(value), na.rm = TRUE)
+valid_data <- test[test$Total > 0.00, ]
+cor.test(test$oral_hygiene_score, test$Total, method = "pearson")
+
+test$log10_count <- log10(test$Total)
+wilcox_test(as.data.frame(test), log10_count ~ hiv_status) %>%
+  adjust_pvalue(method = "BH") %>%
+  add_significance()    
+aggregate(log10_count ~ hiv_status, data = test, FUN = mean, na.rm = TRUE)
+# cor.test(1 / (red_mean3$Total + 1), red_mean3$oral_hygiene_score, method = "pearson")
+# cor.test(red_mean3$Total, scale(red_mean3$oral_hygiene_score, center = TRUE, scale = TRUE), method = "sp")
+
+# red_mean3$rounded <- round(as.numeric(red_mean3$Total), 2)
 
 cor.test(red_mean3$Total, red_mean3$oral_hygiene_score, method = "pearson") #not sig
 red_mean3$prop <- red_mean3$Total*100
 # make corr graph
 hivCols <- c("#8213A0", "#FA78FA", "#40A0FA")
 ords <- c("HI", "HEU", "HUU")
-red_mean3$hiv_status <- factor(red_mean3$hiv_status, levels = ords)
+test$hiv_status <- factor(test$hiv_status, levels = ords)
 # red_mean3$Total <- as.integer(red_mean3$Total)
+
+
 
 pdf("rna.redvoral.relcorr.pdf", height =7, width =15)
 ggscatter(red_mean3, x = "oral_hygiene_score", y = "Total",
@@ -661,17 +745,17 @@ ggscatter(red_mean3, x = "oral_hygiene_score", y = "Total",
   theme_bw()+
   theme(
     legend.position = "none",  
-    axis.title.x = element_text(size = 22), 
-    axis.title.y = element_text(size = 22), 
-    axis.text.x = element_text(size = 18),   
-    axis.text.y = element_text(size = 18),
+    axis.title.x = element_text(size = 18), 
+    axis.title.y = element_text(size = 18), 
+    axis.text.x = element_text(size = 16),   
+    axis.text.y = element_text(size = 16),
     ggside.axis.text.y= element_text(size = 10),
     ggside.axis.text.x= element_text(size = 10)
   ) +
   scale_ysidex_continuous(guide = guide_axis(angle = 90), minor_breaks = NULL)+
   labs(
-    x = "Simplified Oral Hygiene Index",
-    y = "Proportion of Red Complex Transcripts" 
+    x = "Simplified Oral Hygiene Score",
+    y = "Relative Abundance of Red Complex Transcripts" 
   )
 dev.off()
 system("~/.iterm2/imgcat ./rna.redvoral.relcorr.pdf")
@@ -715,6 +799,7 @@ ann <- homd[homd$tag %in% rownames(genecounts),]
 rownames(ann) <- ann$tag
 sortrow <- rownames(ann)[order(match(rownames(genecounts), rownames(ann)))]
 genecounts <- genecounts[sortrow, , drop=FALSE]
+genecounts <- genecounts + 1
 ann <- ann[sortrow, , drop=FALSE]
 
 # check that locus tags match between the two dataframes
@@ -746,11 +831,11 @@ sub_data <- left_join(collapsed_long2, metadata, by = c("sample" = "sample_id"))
 red_mean3 <- sub_data %>% 
   group_by(sample, hiv_status, oral_hygiene_score, gingival_inflammation_score, cd4_count) %>% 
   summarise(Total = sum(count, na.rm = TRUE))
-cor.test(red_mean3$Total, red_mean3$oral_hygiene_score, method = "pearson") #not sig
+cor.test(log10(red_mean3$Total), red_mean3$oral_hygiene_score, method = "pearson") #not sig
 results <- red_mean3 %>%
   group_by(hiv_status) %>%
   summarise(
-    cor_value = cor(log(Total), oral_hygiene_score, method = "pearson"),  # Compute correlation directly
+    cor_value = cor(log10(Total), oral_hygiene_score, method = "pearson"),  # Compute correlation directly
     p_value = cor.test(log(Total), oral_hygiene_score, method = "pearson")$p.value,  # Extract p-value
     .groups = 'drop'
   )
@@ -764,7 +849,7 @@ collapsed_long <- collapsed_long %>%
 # genomes to get 
 red_seqs <- unique(sort(homd[homd$species  == "Porphyromonas_gingivalis" | homd$species  == "Treponema_denticola" | homd$species  == "Tannerella_forsythia",]$genome))
 collapsed_long2 <- collapsed_long[collapsed_long$genome %in% red_seqs,]
-sub_data <- left_join(collapsed_long2, submap, by = c("sample" = "sample_id"))
+sub_data <- left_join(collapsed_long2, metadata, by = c("sample" = "sample_id"))
 red_mean3 <- sub_data %>% 
   group_by(sample, hiv_status, oral_hygiene_score, gingival_inflammation_score, cd4_count) %>% 
   summarise(Total = sum(log10_count, na.rm = TRUE))
@@ -889,8 +974,16 @@ collapsed_long <- group_percentages %>%
   pivot_longer(cols = -species, names_to = "sample", values_to = "count")
 red_seqs <- unique(sort(homd[homd$species  == "Porphyromonas_gingivalis" | homd$species  == "Treponema_denticola" | homd$species  == "Tannerella_forsythia",]$genome))
 
+
 collapsed_long2 <- collapsed_long[collapsed_long$species == "Porphyromonas_gingivalis" | collapsed_long$species  == "Treponema_denticola" | collapsed_long$species  == "Tannerella_forsythia",]
 sub_data <- left_join(collapsed_long2, metadata, by = c("sample" = "sample_id"))
+sub_data %>%
+  group_by(species) %>%
+  summarise(
+    cor_value = cor(count, oral_hygiene_score, method = "pearson"),  # Compute correlation directly
+    p_value = cor.test(count, oral_hygiene_score, method = "pearson")$p.value,  # Extract p-value
+    .groups = 'drop'
+  )
 
 red_mean3 <- sub_data %>% 
   group_by(sample, hiv_status, oral_hygiene_score, gingival_inflammation_score, cd4_count) %>% 
@@ -917,10 +1010,11 @@ library(ggpubr)
 setwd("/home/suzanne/rna_dohmain/11-perio/07-inflammation")
 load("../../rpoc/ps.RData")
 glom <- tax_glom(ps.dat, taxrank=rank_names(ps.dat)[8])
-rel <- microbiome::transform(ps.dat, "clr")
+glom <- microbiome::transform(glom, method = "add", value = 1)
+rel <- microbiome::transform(glom, "compositional")
 actino <- subset_taxa(rel, V8=="Porphyromonas_gingivalis" | V8=="Tannerella_forsythia" | V8=="Treponema_denticola")
-glom <- tax_glom(actino, taxrank=rank_names(actino)[8])
-data <- psmelt(glom) # create dataframe from phyloseq object
+# glom <- tax_glom(actino, taxrank=rank_names(actino)[8])
+data <- psmelt(actino) # create dataframe from phyloseq object
 data$Sample<- factor(data$Sample,levels=unique(data$Sample))
 red_dna <- select(data, Sample, hiv_status, oral_hygiene_score, gingival_inflammation_score, total_Ca_mg, Abundance, V8)
 red_dna$nucl <- "dna"
@@ -930,12 +1024,18 @@ red_dna <- red_dna %>%
   dplyr::rename(species = V8)
 red_dna <- red_dna %>%
   dplyr::rename(value = Abundance)
-
+red_dna %>%
+  group_by(species) %>%
+  summarise(
+    cor_value = cor(value, oral_hygiene_score, method = "pearson"),  # Compute correlation directly
+    p_value = cor.test(value, oral_hygiene_score, method = "pearson")$p.value,  # Extract p-value
+    .groups = 'drop'
+  )
 dna <- red_dna %>% 
   group_by(sample, hiv_status, oral_hygiene_score, gingival_inflammation_score, total_Ca_mg) %>% 
   summarise(Total = sum(value, na.rm = TRUE), .groups = "drop")
 #oral 
-cor.test(dna$oral_hygiene_score, dna$Total, method = "pearson") # not sig
+cor.test(log10(dna$oral_hygiene_score), dna$Total, method = "pearson") # not sig
 cor.test(dna$total_Ca_mg, dna$Total, method = "spearman") # not sig
 
 pdf("dna.oral.corr.pdf")
@@ -2030,3 +2130,214 @@ ggplot(collapsed_long, aes(x = sample, y = log10_count, fill = species)) +
 dev.off()
 system("~/.iterm2/imgcat rpoC_log10_balOHS.pdf")
 ```
+# 8. Deseq with OHS
+```R
+library(ggplot2, warn.conflicts = F, quietly = T)
+library(DESeq2, warn.conflicts = F, quietly = T)
+library(apeglm, warn.conflicts = F, quietly = T)
+library(EnhancedVolcano)
+library(dplyr)
+library(viridis)
+#load data
+setwd("/home/suzanne/rna_dohmain/11-perio/07-inflammation")
+metadata <- read.table("~/rna_dohmain/homd_map/map.txt", header=T, sep="\t")
+# remove dashes from health categories or it will mess up downstream processing
+metadata$aliquot_type <- sub("-", "", metadata$aliquot_type)
+row.names(metadata) <- metadata$sample_id
+# read in gene counts file
+genecounts <- read.table("../02-pgap/gene_counts.txt", header=T, sep="\t", row.names=1)
+# get rid of weird empty column in genecounts
+# genecounts <- genecounts[1:(length(genecounts)-1)]
+# fix sample names in gene counts so they match the metadata
+colnames(genecounts) <- gsub(x = names(genecounts), pattern = "\\.red", replacement = "") 
+colnames(genecounts) <- gsub(x = names(genecounts), pattern = "\\.", replacement = "-") 
+# filter metadata so that we only compare H to D
+submap <- metadata[metadata$hiv_status == "HUU" | metadata$hiv_status == "HEU" | metadata$hiv_status == "HI",]
+# submap <- submap[submap$sample_id %in% sample_list, ]
+subcount <- genecounts[, colnames(genecounts) %in% row.names(submap)]
+# add pseudocount to avoid errors with size factor estimation
+subcount <- subcount + 1
+# reorder columns by metadata 
+submap <- submap[order(colnames(subcount)),]
+# colnames(genecounts)
+# rownames(metadata)
+# check to make sure that sample ids match between gene counts and metadata
+table(colnames(subcount)==submap$sample_id) # should return all true
+submap$oral_hygiene_score <- as.numeric(submap$oral_hygiene_score)
+submap$oral_hygiene_score_scaled <- scale(submap$oral_hygiene_score, center = TRUE, scale = TRUE)
+
+# create deseq object
+star_results <- DESeqDataSetFromMatrix(countData = subcount, colData = submap, design = ~oral_hygiene_score_scaled)
+star_results <- star_results[rowSums(counts(star_results)) >= 50,]
+star_results
+# star_results$Ca_category <- factor(star_results$Ca_category, levels=c("low", "normal"))
+
+# run deseq
+ptm <- proc.time()
+se_star <- DESeq(star_results, fitType="local")
+proc.time() - ptm 
+# normalize counts
+norm_counts <- log2(counts(se_star, normalized = TRUE)+1)
+
+res <- results(se_star, alpha=0.05)
+# order by p value
+res <- res[order(res$padj),]
+paste("number of genes with adjusted p value lower than 0.05: ", sum(res$padj < 0.05, na.rm=TRUE))
+summary(res)
+# [1] "number of genes with adjusted p value lower than 0.05:  362856"
+# out of 6585836 with nonzero total read count
+# adjusted p-value < 0.05
+# LFC > 0 (up)       : 167304, 2.5%
+# LFC < 0 (down)     : 195552, 3%
+# outliers [1]       : 0, 0%
+# low counts [2]     : 5355253, 81%
+# (mean count < 1)
+# HUU is positive, HEU cavity negative
+resLFC <- lfcShrink(se_star, coef="total_Ca_scaled", type="apeglm")
+resLFC <- resLFC[order(resLFC$padj),]
+paste("number of genes with adjusted p value lower than 0.05: ", sum(resLFC$padj < 0.05, na.rm=TRUE))
+summary(resLFC)
+# [1] "number of genes with adjusted p value lower than 0.05:  362856"
+# out of 6585836 with nonzero total read count
+# adjusted p-value < 0.1
+# LFC > 0 (up)       : 201971, 3.1%
+# LFC < 0 (down)     : 237241, 3.6%
+# outliers [1]       : 0, 0%
+# low counts [2]     : 5355253, 81%
+# (mean count < 1)
+# [1] see 'cooksCutoff' argument of ?results
+# [2] see 'independentFiltering' argument of ?results
+write.table(resLFC, file="deseq_results_global-OHS.txt", quote=F, sep="\t")
+save.image("deseq_results_global-OHS.RData")
+```
+# 9. Look at calculus and debris for Vince
+```R
+library(devtools)
+library(phyloseq)
+library(RColorBrewer)
+library(tidyverse)
+library(reshape2)
+library(ggplot2)
+library(ape)
+library(microbiome)
+library(ggpubr)
+library(rstatix)
+library(viridis)
+library(rstatix)
+
+#load data
+setwd("/home/suzanne/rna_dohmain/11-perio/07-inflammation")
+meta <- read.csv("~/long_oral/map_domhain_long_2.txt", sep="\t", header=T)
+hiv_stat <- c("HI", "HEU", "HUU")
+hivCols <- c("#8213A0", "#FA78FA", "#40A0FA")
+meta$hiv_status <- factor(meta$hiv_status, levels = hiv_stat)
+
+wilcox_test(meta, Oral_Hygiene_Score ~ sex) %>%
+  add_significance()
+meta$Oral_Hygiene_Score <- as.numeric(meta$Oral_Hygiene_Score)
+meta$total_Ca_mg <- as.numeric(meta$total_Ca_mg)
+meta$pH <- as.numeric(meta$pH)
+meta$flow_rate <- as.numeric(meta$flow_rate)
+meta$cd4_count <- as.numeric(meta$cd4_count)
+
+meta$anterior_calculus <- rowSums(meta[, c("Calculus_index_11", "Calculus_index_31")], na.rm = TRUE) / nrow(meta)
+meta$posterior_calculus <- rowSums(meta[, c("Calculus_index_16", "Calculus_index_26", "Calculus_index_46", "Calculus_index_36")], na.rm = TRUE) / nrow(meta)
+meta$anterior_gingival <- rowSums(meta[, c("Gingival_index_11", "Gingival_index_31")], na.rm = TRUE) / nrow(meta)
+meta$posterior_gingival <- rowSums(meta[, c("Gingival_index_16", "Gingival_index_24", "Gingival_index_44", "Gingival_index_36")], na.rm = TRUE) / nrow(meta)
+meta$hiv_status <- factor(meta$hiv_status, levels=c("HI", "HEU", "HUU"))
+meta$Oral_Hygiene_Score_Remark <- factor(meta$Oral_Hygiene_Score_Remark, levels=c("Good", "Fair", "Poor"))
+
+ant <- data.frame(sample_id = paste0(meta$study_id,"V",meta$visit_num))
+ant$hiv_status <- meta$hiv_status
+ant$location <- "anterior"
+ant$calculus_index <- meta$anterior_calculus
+ant$gingival_index <- meta$anterior_gingival
+ant$Oral_Hygiene_Score_Remark <- meta$Oral_Hygiene_Score_Remark
+ant$Oral_Hygiene_Score <- meta$Oral_Hygiene_Score
+
+post <- data.frame(sample_id = paste0(meta$study_id,"V",meta$visit_num))
+post$hiv_status <- meta$hiv_status
+post$location <- "posterior"
+post$calculus_index <- meta$posterior_calculus
+post$gingival_index <- meta$posterior_gingival
+post$Oral_Hygiene_Score_Remark <- meta$Oral_Hygiene_Score_Remark
+post$Oral_Hygiene_Score <- meta$Oral_Hygiene_Score
+
+compare_calculus <- unique(rbind(ant, post))
+pdf("calculus_score.location.pdf")
+ggplot(compare_calculus, aes(x = location, y = pmax(as.numeric(calculus_index), 0))) + 
+    geom_point(aes(color = Oral_Hygiene_Score_Remark), position = position_jitter(width = 0.4, height = 0.0006)) + 
+    scale_color_manual(values = c("Good" = "#006164", "Fair" = "#EDA247", "Poor" = "#DB4325")) +
+    theme_bw() +
+    # geom_hline(yintercept = c(1.2, 3.1), linetype = "dashed") +
+    geom_pwc(label = "{p.format}{p.signif}", hide.ns = TRUE, p.adjust.method = "fdr") +
+    stat_summary(geom = "point", fun = "mean", size = 5, shape = 23, fill = "red") +
+    stat_summary(geom = "text", fun = "mean", aes(label = paste("Mean: ", scales::number(..y.., accuracy = 0.0001))), 
+                  vjust = -40.5, size = 2, color = "black") +  
+    scale_y_continuous(limits = c(0, 0.005), oob = scales::squish) +
+    ylab("Calculus index") +
+    xlab(NULL) +
+    labs(color = "Oral Hygiene\nScore Remark") +
+    facet_wrap(~hiv_status) +
+    theme(legend.title = element_text(size=9), legend.title.align = 0.0) 
+dev.off()
+system("~/.iterm2/imgcat ./calculus_score.location.pdf")
+
+pdf("calculus_score.hiv.pdf")
+ggplot(compare_calculus, aes(x = hiv_status, y = pmax(as.numeric(calculus_index), 0))) + 
+    geom_point(aes(color = Oral_Hygiene_Score_Remark), position = position_jitter(width = 0.4, height = 0.0006)) + 
+    scale_color_manual(values = c("Good" = "#006164", "Fair" = "#EDA247", "Poor" = "#DB4325")) +
+    theme_bw() +
+    # geom_hline(yintercept = c(1.2, 3.1), linetype = "dashed") +
+    geom_pwc(label = "{p.format}{p.signif}", hide.ns = TRUE, p.adjust.method = "fdr") +
+    stat_summary(geom = "point", fun = "mean", size = 5, shape = 23, fill = "red") +
+    stat_summary(geom = "text", fun = "mean", aes(label = paste("Mean: ", scales::number(..y.., accuracy = 0.0001))), 
+                  vjust = -40.5, size = 2, color = "black") +  
+    scale_y_continuous(limits = c(0, 0.005), oob = scales::squish) +
+    ylab("Calculus index") +
+    xlab(NULL) +
+    labs(color = "Oral Hygiene\nScore Remark") +
+    facet_wrap(~location) +
+    theme(legend.title = element_text(size=9), legend.title.align = 0.0) 
+dev.off()
+system("~/.iterm2/imgcat ./calculus_score.hiv.pdf")
+
+pdf("gingival_inflammation.location.pdf")
+ggplot(compare_calculus, aes(x = location, y = pmax(as.numeric(gingival_index), 0))) + 
+    geom_point(aes(color = Oral_Hygiene_Score_Remark), position = position_jitter(width = 0.4, height = 0.0006)) + 
+    scale_color_manual(values = c("Good" = "#006164", "Fair" = "#EDA247", "Poor" = "#DB4325")) +
+    theme_bw() +
+    # geom_hline(yintercept = c(1.2, 3.1), linetype = "dashed") +
+    geom_pwc(label = "{p.format}{p.signif}", hide.ns = TRUE, p.adjust.method = "fdr") +
+    stat_summary(geom = "point", fun = "mean", size = 5, shape = 23, fill = "red") +
+    stat_summary(geom = "text", fun = "mean", aes(label = paste("Mean: ", scales::number(..y.., accuracy = 0.0001))), 
+                vjust = -40.5, size = 2, color = "black") +  
+    scale_y_continuous(limits = c(0, 0.005), oob = scales::squish) +
+    ylab("Gingival inflammation") +
+    xlab(NULL) +
+    labs(color = "Oral Hygiene\nScore Remark") +
+    facet_wrap(~hiv_status) +
+    theme(legend.title = element_text(size=9), legend.title.align = 0.0) 
+dev.off()
+system("~/.iterm2/imgcat ./gingival_inflammation.location.pdf")
+
+pdf("gingival_inflammation.hiv_status.pdf")
+ggplot(compare_calculus, aes(x = hiv_status, y = pmax(as.numeric(gingival_index), 0))) + 
+    geom_point(aes(color = Oral_Hygiene_Score_Remark), position = position_jitter(width = 0.4, height = 0.0006)) + 
+    scale_color_manual(values = c("Good" = "#006164", "Fair" = "#EDA247", "Poor" = "#DB4325")) +
+    theme_bw() +
+    # geom_hline(yintercept = c(1.2, 3.1), linetype = "dashed") +
+    geom_pwc(label = "{p.format}{p.signif}", hide.ns = TRUE, p.adjust.method = "fdr") +
+    stat_summary(geom = "point", fun = "mean", size = 5, shape = 23, fill = "red") +
+    stat_summary(geom = "text", fun = "mean", aes(label = paste("Mean: ", scales::number(..y.., accuracy = 0.0001))), 
+                vjust = -40.5, size = 2, color = "black") +  
+    scale_y_continuous(limits = c(0, 0.005), oob = scales::squish) +
+    ylab("Gingival inflammation") +
+    xlab(NULL) +
+    labs(color = "Oral Hygiene\nScore Remark") +
+    facet_wrap(~location) +
+    theme(legend.title = element_text(size=9), legend.title.align = 0.0) 
+dev.off()
+system("~/.iterm2/imgcat ./gingival_inflammation.hiv_status.pdf")
+```
+
