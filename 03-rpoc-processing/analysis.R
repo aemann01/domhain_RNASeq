@@ -1,42 +1,42 @@
-library(phyloseq)
-library(Biostrings)
-library(ape)
-setwd("~/rna_dohmain/rpoc/")
-# #rpoc
-# # frequency
-seqtab_rpoc <- read.table("~/rna_dohmain/rpoc/sequence_table.merged.txt", header=T, row.names=1)
-asv_rpoc <-otu_table(seqtab_rpoc, taxa_are_rows=F)
-# #taxonomy
-tax_tab_rpoc <- read.table("~/rna_dohmain/rpoc/taxonomy_bac.txt", header=F, row.names=1, sep="\t")
-tax_rpoc <- tax_table(as.matrix(tax_tab_rpoc))
-# #ref sequences
-refseq_rpoc <- Biostrings::readDNAStringSet("~/rna_dohmain/rpoc/rep_set.fa")
-# #metadata
-metadata <- read.table("~/rna_dohmain/rpoc/map.txt", sep="\t", header=T, row.names=1)
-metadata$age_y <- as.numeric(metadata$age_y)
+# library(phyloseq)
+# library(Biostrings)
+# library(ape)
+# setwd("~/rna_dohmain/rpoc/")
+# # #rpoc
+# # # frequency
+# seqtab_rpoc <- read.table("~/rna_dohmain/rpoc/sequence_table.merged.txt", header=T, row.names=1)
+# asv_rpoc <-otu_table(seqtab_rpoc, taxa_are_rows=F)
+# # #taxonomy
+# tax_tab_rpoc <- read.table("~/rna_dohmain/rpoc/taxonomy_bac.txt", header=F, row.names=1, sep="\t")
+# tax_rpoc <- tax_table(as.matrix(tax_tab_rpoc))
+# # #ref sequences
+# refseq_rpoc <- Biostrings::readDNAStringSet("~/rna_dohmain/rpoc/rep_set.fa")
+# # #metadata
+# metadata <- read.table("~/rna_dohmain/rpoc/map.txt", sep="\t", header=T, row.names=1)
+# metadata$age_y <- as.numeric(metadata$age_y)
 
-map <- sample_data(metadata)
-# #merge into one phyloseq object
-rpoc.pd <- merge_phyloseq(asv_rpoc, tax_rpoc, refseq_rpoc, map)
-ps.dat <- prune_taxa(
-  taxa_sums(rpoc.pd) > 500 | rowSums(otu_table(rpoc.pd) > 0) / ncol(otu_table(rpoc.pd)) > 0.001,
-  rpoc.pd
-)
-ps.dat <- prune_samples(sample_sums(rpoc.pd) > 4000, rpoc.pd)
-write.table(as.data.frame(row.names(tax_table(ps.dat))), file="asvs_to_keep", sep="\t", col.names=FALSE, row.names=FALSE, quote=FALSE)
-system("/home/suzanne/bin/miniconda3/envs/2024-HIV_RNASeq/bin/seqtk subseq ./rep_set.fa ./asvs_to_keep > ./rep_set.filt.fa")
-system("/home/suzanne/bin/miniconda3/envs/2024-HIV_RNASeq/bin/mafft --thread 7 rep_set.filt.fa > rep_set.align.fa")
-# fasttree neighbor joining tree
-system("/home/suzanne/bin/miniconda3/envs/2024-HIV_RNASeq/bin/fasttree -noml -nt rep_set.align.fa  > rep_set.nj.tre")
-tree <- read.tree("rep_set.nj.tre")
-ps.dat <- merge_phyloseq(ps.dat, tree)
-ps.dat 
-write.table(as.data.frame(otu_table(ps.dat)), "sequence_table.filt.txt", sep="\t", row.names=T, col.names=T, quote=F)
-# write filtered taxonomy to file
-write.table(as.data.frame(tax_table(ps.dat)), "taxonomy_bac.filt.txt", sep="\t", row.names=T, col.names=T, quote=F)
-# filtered metadata
-write.table(as.data.frame(as.matrix(as.data.frame(sample_data(ps.dat)))), "map.filt.txt", sep="\t", row.names=T, col.names=T, quote=F)
-save.image("~/rna_dohmain/rpoc/ps.RData")
+# map <- sample_data(metadata)
+# # #merge into one phyloseq object
+# rpoc.pd <- merge_phyloseq(asv_rpoc, tax_rpoc, refseq_rpoc, map)
+# ps.dat <- prune_taxa(
+#   taxa_sums(rpoc.pd) > 500 | rowSums(otu_table(rpoc.pd) > 0) / ncol(otu_table(rpoc.pd)) > 0.001,
+#   rpoc.pd
+# )
+# ps.dat <- prune_samples(sample_sums(rpoc.pd) > 4000, rpoc.pd)
+# write.table(as.data.frame(row.names(tax_table(ps.dat))), file="asvs_to_keep", sep="\t", col.names=FALSE, row.names=FALSE, quote=FALSE)
+# system("/home/suzanne/bin/miniconda3/envs/2024-HIV_RNASeq/bin/seqtk subseq ./rep_set.fa ./asvs_to_keep > ./rep_set.filt.fa")
+# system("/home/suzanne/bin/miniconda3/envs/2024-HIV_RNASeq/bin/mafft --thread 7 rep_set.filt.fa > rep_set.align.fa")
+# # fasttree neighbor joining tree
+# system("/home/suzanne/bin/miniconda3/envs/2024-HIV_RNASeq/bin/fasttree -noml -nt rep_set.align.fa  > rep_set.nj.tre")
+# tree <- read.tree("rep_set.nj.tre")
+# ps.dat <- merge_phyloseq(ps.dat, tree)
+# ps.dat 
+# write.table(as.data.frame(otu_table(ps.dat)), "sequence_table.filt.txt", sep="\t", row.names=T, col.names=T, quote=F)
+# # write filtered taxonomy to file
+# write.table(as.data.frame(tax_table(ps.dat)), "taxonomy_bac.filt.txt", sep="\t", row.names=T, col.names=T, quote=F)
+# # filtered metadata
+# write.table(as.data.frame(as.matrix(as.data.frame(sample_data(ps.dat)))), "map.filt.txt", sep="\t", row.names=T, col.names=T, quote=F)
+# save.image("~/rna_dohmain/rpoc/ps.RData")
 
 #start analysis
 library("gridExtra")
