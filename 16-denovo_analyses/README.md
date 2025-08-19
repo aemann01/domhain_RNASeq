@@ -323,7 +323,6 @@ mv temp read_counts.txt
 #     install.packages("BiocManager")
 
 # BiocManager::install("apeglm")
-
 library(ggplot2, warn.conflicts = F, quietly = T)
 library(DESeq2, warn.conflicts = F, quietly = T)
 library(apeglm, warn.conflicts = F, quietly = T)
@@ -338,6 +337,9 @@ row.names(metadata) <- metadata$sample_id
 genecounts <- read.table("~/domhain_RNAseq/12-denovo_analyses/featurecounts/read_counts.txt", header=T, sep="\t", row.names=1)
 # fix sample names in gene counts so they match the metadata
 colnames(genecounts) <- gsub(x = names(genecounts), pattern = "\\.", replacement = "-") 
+# also fix sample name error in genecounts file
+genecounts <- genecounts %>% 
+  rename(DM00428V2PQ75 = DM00428V2PQ84)
 # remove empty last column (if you run this more than once it will start removing actual samples, make sure your dim after is expected)
 genecounts <- genecounts[, -ncol(genecounts)]
 dim(genecounts)    
@@ -388,6 +390,7 @@ summary(res)
 # (mean count < 2)
 # [1] see 'cooksCutoff' argument of ?results
 # [2] see 'independentFiltering' argument of ?results
+resultsNames(se_star)
 # HUU is positive, HI negative
 resLFC <- lfcShrink(se_star, coef="hiv_status_HUU_vs_HI", type="apeglm")
 resLFC <- resLFC[order(resLFC$padj),]
@@ -415,22 +418,1021 @@ plotPCA(vld, intgroup=c("hiv_status")) + theme_minimal()
 dev.off()
 system("/home/allie/.iterm2/imgcat pca_pdvpf_ADS-H-HIvHUU.pdf")
 # like before, no real clustering patterns
+```
 
-## Tree figure
+### 11. Tree figure
 
-
-
-
-
-
-
-
-
-
-
-
-
-
+```bash
+# First need to get file that links locus tag to transcript of origin to collapse our deseq results
+grep "NODE" PROKKA_04112025.gff | grep -v "^>" | awk -F"\t" '{print $1 "\t" $9}' | sed 's/;/\t/g' | awk -F"\t" '{print $1 "\t" $2}' | grep "gene" | sed 's/ID=//' | sed 's/:.*\t/\t/' > locustag_transcript.txt
 ```
 
 
+```R
+# if (!requireNamespace("BiocManager", quietly=TRUE))
+#     install.packages("BiocManager")
+# BiocManager::install("ggtreeExtra")
+# install.packages("ggstar")
+library(ggtreeExtra)
+library(ggstar)
+library(ggplot2)
+library(ggtree)
+library(treeio)
+library(ggnewscale)
+library(dplyr)
+library(stringr)
+
+# read in newick tree file (this was midpoint rooted in figtree first)
+tree <- read.tree("RAxML_bestTree-root.tre")
+
+# read in transcript/locus tag annotation file
+annot <- read.table("prokka_out_ADS/locustag_transcript.txt", header=F)
+# read back in deseq results
+deres <- read.table("deseq_results_ADS-H-HIvHUU.txt", header=T)
+# merge based on rownames and V2
+deres <- deres %>% 
+  tibble::rownames_to_column("RowNames")
+# merge
+mergedat <- annot %>% 
+  left_join(deres, by = c("V2" = "RowNames"))
+# group by transcript ID, get the average of all numerical values 
+mean_sum <- mergedat %>%
+  group_by(V1) %>%
+  summarize(
+    across(c(baseMean, log2FoldChange, lfcSE, pvalue, padj), 
+           ~ mean(., na.rm = TRUE),
+           .names = "mean_{.col}")
+  )
+# now add in taxonomic identifiers for annotating the tree
+tax <- read.table("annotations.txt", header=T)
+mean_sum <- mean_sum %>% 
+  left_join(tax, by = c("V1" = "seqid"))
+# convert to dataframe 
+mean_sum <- as.data.frame(mean_sum)
+# get genus only column 
+mean_sum <- mean_sum %>%
+  mutate(genus = str_extract(taxonomy, "^[^_ ]+"))
+# make genus a factor
+mean_sum$genus <- as.factor(mean_sum$genus)
+# rename column
+colnames(mean_sum)[colnames(mean_sum) == "V1"] <- "label"
+
+# sanity check -- do the tip labels match up with our mean_sum file?
+tips <- tree$tip.label
+nodes <- mean_sum$label
+setdiff(tips, nodes) # should come back as character(0)
+
+# base tree
+p <- ggtree(tree, layout="fan", open.angle=10, size=0.25)
+
+# genus colors
+gencol <- c(
+    "Actinomyces" = "#F04932",
+    "Bacteria" = "black",
+    "Bulleidia" = "#F8E0B1",
+    "Clostridium" = "#97002E",
+    "Cutibacterium" = "#93FE70",
+    "Kingella" = "#23C0CA",
+    "Streptococcus" = "#1C9D38",
+    "Treponema" = "#0C5B6F", 
+    "unclassified" = "#6C6C6C")
+
+# add genus ring
+p2 <- p + 
+  geom_fruit(
+    data = mean_sum,
+    geom = geom_tile,
+    mapping = aes(y = label, fill = genus),  # Assuming 'label' matches tip labels
+    width = 0.30,  # Adjust ring width
+    offset = 0.05  # Adjust distance from tree
+  ) +
+  scale_fill_manual(
+    name = "Genus",
+    values = gencol,
+    na.value = "grey90"  # Color for NA values
+  ) +
+  guides(fill = guide_legend(
+    ncol = 2,  # Adjust legend columns
+    keywidth = 0.5,
+    keyheight = 0.5
+  ))
+
+# add heatmap ring
+p3 <- p2 +
+  new_scale_fill() +
+  geom_fruit(
+    data = mean_sum,
+    geom = geom_tile,
+    mapping = aes(y = label, fill = mean_log2FoldChange),
+    width = 0.5,
+    offset = 0.15  # Place after genus ring
+  ) +
+  scale_fill_gradient2(
+    name = "log2FC",
+    low = "#D73027",  # low is HI 
+    mid = "#f7f7f7",  # White
+    high = "#4575B4",  # high is HUU 
+    midpoint = 0,      # Center at zero
+    na.value = "grey90",
+    limits = c(-5, 5)  # Symmetrical limits
+  )
+
+# finally add barchart showing base mean
+p4 <- p3 +
+  new_scale_fill() +  # Create new scale for this layer
+  geom_fruit(
+    data = mean_sum,
+    geom = geom_bar,
+    mapping = aes(
+      y = label, 
+      x = mean_baseMean,  
+      fill = genus   # color bars by genus
+    ),
+    stat = "identity",
+    orientation = "y",
+    width = 0.5,     # Width of the bar chart ring
+    offset = 0.15      # Position after previous rings
+  ) +
+  # Option 1: Use genus colors consistent with first ring
+  scale_fill_manual(
+    values = gencol,
+    guide = "none"    # Hide legend since we already have genus colors
+  ) +
+  # Add space between rings
+  theme(legend.position = "right")
+
+p_final <- p4 +
+  # Add significance markers
+  geom_fruit(
+    data = subset(mean_sum, mean_padj < 0.05),
+    geom = geom_point,
+    mapping = aes(y = label),
+    shape = 8,          # Star shape
+    size = 0.5,         # Adjust size
+    color = "black",    # Marker color
+    fill = "black",     # For shapes with fill
+    stroke = 0.5,       # Border thickness
+    offset = 0.005       # Position outside other rings
+  )
+
+# how many up or down regulated taxa?
+mean_sum %>%
+  filter(mean_padj < 0.05) %>%
+  summarize(
+    total_sig = n(),
+    upregulated = sum(mean_log2FoldChange > 0, na.rm = TRUE),
+    downregulated = sum(mean_log2FoldChange < 0, na.rm = TRUE),
+    .groups = 'drop'
+  )
+
+#   total_sig upregulated downregulated
+# 1        49          19            30
+# more upregulated taxa (mostly in Treponema but all at very low (comparatively) base mean)
+
+pdf("denovo_tree.H-HIvHUU.pdf")
+p_final
+dev.off()
+system("/home/allie/.iterm2/imgcat denovo_tree.H-HIvHUU.pdf")
+
+# I want to have a companion plot of the distribution of genera up or down regulated in these categories 
+mean_sum_enriched <- mean_sum %>%
+  mutate(
+    HIV_status = case_when(
+      mean_log2FoldChange > 0 & mean_padj < 0.05 ~ "HUU_upregulated",
+      mean_log2FoldChange < 0 & mean_padj < 0.05 ~ "HI_upregulated",
+      TRUE ~ "Non_sig"  # Not significant
+    ),
+    Genus = str_extract(taxonomy, "^[^_]+")  # Extract genus (e.g., "Streptococcus" from "Streptococcus_sp.")
+  ) %>%
+  filter(HIV_status != "Non_sig")  # Keep only significant genes
+
+genus_counts <- mean_sum_enriched %>%
+  count(HIV_status, Genus) %>%
+  group_by(HIV_status) %>%
+  mutate(Percent = 100 * n / sum(n)) %>%  # Convert to percentage
+  ungroup()
+
+# Plot 
+p <- ggplot(genus_counts, aes(x = HIV_status, y = Percent, fill = Genus)) +
+  geom_col(position = "stack", color = "black", width = 0.7) +
+  geom_text(
+    aes(label = ifelse(Percent > 5, sprintf("%.1f%%", Percent), "")),  # Label only >5%
+    position = position_stack(vjust = 0.5),
+    size = 3
+  ) +
+  scale_fill_manual(values = gencol) +  
+  labs(
+    title = "Taxonomic Distribution of Upregulated Genes",
+    x = "HIV Status",
+    y = "Percentage of Upregulated Genes",
+    fill = "Genus"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    legend.position = "right"
+  )
+
+pdf("genera_prop.H-HIvHUU.pdf")
+p
+dev.off()
+system("/home/allie/.iterm2/imgcat genera_prop.H-HIvHUU.pdf")
+```
+
+### 12. Comparing healthy teeth HUU vs HEU
+
+```R
+# filter genecounts and metadata to only include healthy teeth
+submap <- metadata[metadata$tooth_health == "H",]
+# HI vs HUU
+submap <- submap[submap$hiv_status == "HEU" | submap$hiv_status == "HUU",]
+dim(submap)
+# filter genecounts by submap samples
+subcount <- genecounts[, colnames(genecounts) %in% row.names(submap)]
+dim(subcount)
+# add pseudocount to avoid errors with size factor estimation
+subcount <- subcount + 1
+# reorder columns by metadata 
+submap <- submap[order(colnames(subcount)),]    
+# colnames(genecounts)
+# rownames(metadata)
+# check to make sure that sample ids match between gene counts and metadata
+table(colnames(subcount)==submap$sample_id) # should return all true
+
+# create deseq object
+star_results <- DESeqDataSetFromMatrix(countData = subcount, colData = submap, design = ~hiv_status)
+star_results <- star_results[rowSums(counts(star_results)) >= 50,]
+star_results
+star_results$hiv_status <- factor(star_results$hiv_status, levels=c("HEU", "HUU"))
+# run deseq
+ptm <- proc.time()
+se_star <- DESeq(star_results, fitType="local")
+proc.time() - ptm 
+# normalize counts
+norm_counts <- log2(counts(se_star, normalized = TRUE)+1)
+res <- results(se_star, alpha=0.05)
+# order by p value
+res <- res[order(res$padj),]
+paste("number of genes with adjusted p value lower than 0.05: ", sum(res$padj < 0.05, na.rm=TRUE))
+summary(res)
+# out of 923 with nonzero total read count
+# adjusted p-value < 0.05
+# LFC > 0 (up)       : 65, 7%
+# LFC < 0 (down)     : 93, 10%
+# outliers [1]       : 0, 0%
+# low counts [2]     : 0, 0%
+# (mean count < 2)
+# [1] see 'cooksCutoff' argument of ?results
+# [2] see 'independentFiltering' argument of ?results
+resultsNames(se_star)
+# HUU is positive, HEU negative
+resLFC <- lfcShrink(se_star, coef="hiv_status_HUU_vs_HEU", type="apeglm")
+resLFC <- resLFC[order(resLFC$padj),]
+paste("number of genes with adjusted p value lower than 0.05: ", sum(resLFC$padj < 0.05, na.rm=TRUE))
+summary(resLFC)
+# out of 923 with nonzero total read count
+# adjusted p-value < 0.1
+# LFC > 0 (up)       : 102, 11%
+# LFC < 0 (down)     : 120, 13%
+# outliers [1]       : 0, 0%
+# low counts [2]     : 0, 0%
+# (mean count < 2)
+# [1] see 'cooksCutoff' argument of ?results
+# [2] see 'independentFiltering' argument of ?results
+
+# write results to file
+write.table(resLFC, file="deseq_results_ADS-H-HEUvHUU.txt", quote=F, sep="\t")
+# save.image()
+
+## PCA Plot
+# transform for visualizations
+vld <- varianceStabilizingTransformation(se_star, fitType="local")
+pdf("pca_pdvpf_ADS-H-HEUvHUU.pdf")
+plotPCA(vld, intgroup=c("hiv_status")) + theme_minimal()
+dev.off()
+system("/home/allie/.iterm2/imgcat pca_pdvpf_ADS-H-HEUvHUU.pdf")
+
+### Tree figure
+
+# read back in deseq results
+deres <- read.table("deseq_results_ADS-H-HEUvHUU.txt", header=T)
+# merge based on rownames and V2
+deres <- deres %>% 
+  tibble::rownames_to_column("RowNames")
+# merge
+mergedat <- annot %>% 
+  left_join(deres, by = c("V2" = "RowNames"))
+# group by transcript ID, get the average of all numerical values 
+mean_sum <- mergedat %>%
+  group_by(V1) %>%
+  summarize(
+    across(c(baseMean, log2FoldChange, lfcSE, pvalue, padj), 
+           ~ mean(., na.rm = TRUE),
+           .names = "mean_{.col}")
+  )
+# now add in taxonomic identifiers for annotating the tree
+tax <- read.table("annotations.txt", header=T)
+mean_sum <- mean_sum %>% 
+  left_join(tax, by = c("V1" = "seqid"))
+# convert to dataframe 
+mean_sum <- as.data.frame(mean_sum)
+# get genus only column 
+mean_sum <- mean_sum %>%
+  mutate(genus = str_extract(taxonomy, "^[^_ ]+"))
+# make genus a factor
+mean_sum$genus <- as.factor(mean_sum$genus)
+# rename column
+colnames(mean_sum)[colnames(mean_sum) == "V1"] <- "label"
+
+# sanity check -- do the tip labels match up with our mean_sum file?
+tips <- tree$tip.label
+nodes <- mean_sum$label
+setdiff(tips, nodes) # should come back as character(0)
+
+# base tree
+p <- ggtree(tree, layout="fan", open.angle=10, size=0.25)
+
+# genus colors
+gencol <- c(
+    "Actinomyces" = "#F04932",
+    "Bacteria" = "black",
+    "Bulleidia" = "#F8E0B1",
+    "Clostridium" = "#97002E",
+    "Cutibacterium" = "#93FE70",
+    "Kingella" = "#23C0CA",
+    "Streptococcus" = "#1C9D38",
+    "Treponema" = "#0C5B6F", 
+    "unclassified" = "#6C6C6C")
+
+# add genus ring
+p2 <- p + 
+  geom_fruit(
+    data = mean_sum,
+    geom = geom_tile,
+    mapping = aes(y = label, fill = genus),  # Assuming 'label' matches tip labels
+    width = 0.30,  # Adjust ring width
+    offset = 0.05  # Adjust distance from tree
+  ) +
+  scale_fill_manual(
+    name = "Genus",
+    values = gencol,
+    na.value = "grey90"  # Color for NA values
+  ) +
+  guides(fill = guide_legend(
+    ncol = 2,  # Adjust legend columns
+    keywidth = 0.5,
+    keyheight = 0.5
+  ))
+
+# add heatmap ring
+p3 <- p2 +
+  new_scale_fill() +
+  geom_fruit(
+    data = mean_sum,
+    geom = geom_tile,
+    mapping = aes(y = label, fill = mean_log2FoldChange),
+    width = 0.5,
+    offset = 0.15  # Place after genus ring
+  ) +
+  scale_fill_gradient2(
+    name = "log2FC",
+    low = "#D73027",  # low is HEU
+    mid = "#f7f7f7",  # White
+    high = "#4575B4",  # high is HUU color
+    midpoint = 0,      # Center at zero
+    na.value = "grey90",
+    limits = c(-5, 5)  # Symmetrical limits
+  )
+
+# finally add barchart showing base mean
+p4 <- p3 +
+  new_scale_fill() +  # Create new scale for this layer
+  geom_fruit(
+    data = mean_sum,
+    geom = geom_bar,
+    mapping = aes(
+      y = label, 
+      x = mean_baseMean,  
+      fill = genus   # color bars by genus
+    ),
+    stat = "identity",
+    orientation = "y",
+    width = 0.5,     # Width of the bar chart ring
+    offset = 0.15      # Position after previous rings
+  ) +
+  # Option 1: Use genus colors consistent with first ring
+  scale_fill_manual(
+    values = gencol,
+    guide = "none"    # Hide legend since we already have genus colors
+  ) +
+  # Add space between rings
+  theme(legend.position = "right")
+
+p_final <- p4 +
+  # Add significance markers
+  geom_fruit(
+    data = subset(mean_sum, mean_padj < 0.05),
+    geom = geom_point,
+    mapping = aes(y = label),
+    shape = 8,          # Star shape
+    size = 0.5,         # Adjust size
+    color = "black",    # Marker color
+    fill = "black",     # For shapes with fill
+    stroke = 0.5,       # Border thickness
+    offset = 0.005       # Position outside other rings
+  )
+
+# how many up or down regulated taxa?
+mean_sum %>%
+  filter(mean_padj < 0.05) %>%
+  summarize(
+    total_sig = n(),
+    upregulated = sum(mean_log2FoldChange > 0, na.rm = TRUE),
+    downregulated = sum(mean_log2FoldChange < 0, na.rm = TRUE),
+    .groups = 'drop'
+  )
+
+#   total_sig upregulated downregulated
+# 1        19           9            10
+
+pdf("denovo_tree.H-HEUvHUU.pdf")
+p_final
+dev.off()
+system("/home/allie/.iterm2/imgcat denovo_tree.H-HEUvHUU.pdf")
+
+# taxa stacked plot
+mean_sum_enriched <- mean_sum %>%
+  mutate(
+    HIV_status = case_when(
+      mean_log2FoldChange > 0 & mean_padj < 0.05 ~ "HUU_upregulated",
+      mean_log2FoldChange < 0 & mean_padj < 0.05 ~ "HEU_upregulated",
+      TRUE ~ "Non_sig"  # Not significant
+    ),
+    Genus = str_extract(taxonomy, "^[^_]+")  # Extract genus (e.g., "Streptococcus" from "Streptococcus_sp.")
+  ) %>%
+  filter(HIV_status != "Non_sig")  # Keep only significant genes
+
+genus_counts <- mean_sum_enriched %>%
+  count(HIV_status, Genus) %>%
+  group_by(HIV_status) %>%
+  mutate(Percent = 100 * n / sum(n)) %>%  # Convert to percentage
+  ungroup()
+
+# Plot 
+p <- ggplot(genus_counts, aes(x = HIV_status, y = Percent, fill = Genus)) +
+  geom_col(position = "stack", color = "black", width = 0.7) +
+  geom_text(
+    aes(label = ifelse(Percent > 5, sprintf("%.1f%%", Percent), "")),  # Label only >5%
+    position = position_stack(vjust = 0.5),
+    size = 3
+  ) +
+  scale_fill_manual(values = gencol) +  
+  labs(
+    title = "Taxonomic Distribution of Upregulated Genes",
+    x = "HIV Status",
+    y = "Percentage of Upregulated Genes",
+    fill = "Genus"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    legend.position = "right"
+  )
+
+pdf("genera_prop.H-HEUvHUU.pdf")
+p
+dev.off()
+system("/home/allie/.iterm2/imgcat genera_prop.H-HEUvHUU.pdf")
+```
+
+### 13. Comparing diseased teeth HI vs HUU
+
+```R
+# filter genecounts and metadata to only include diseased teeth
+submap <- metadata[metadata$tooth_health == "D",]
+# HI vs HUU
+submap <- submap[submap$hiv_status == "HI" | submap$hiv_status == "HUU",]
+dim(submap)
+# filter genecounts by submap samples
+subcount <- genecounts[, colnames(genecounts) %in% row.names(submap)]
+dim(subcount)
+# add pseudocount to avoid errors with size factor estimation
+subcount <- subcount + 1
+# reorder columns by metadata 
+submap <- submap[order(colnames(subcount)),]    
+# colnames(genecounts)
+# rownames(metadata)
+# check to make sure that sample ids match between gene counts and metadata
+table(colnames(subcount)==submap$sample_id) # should return all true
+
+# create deseq object
+star_results <- DESeqDataSetFromMatrix(countData = subcount, colData = submap, design = ~hiv_status)
+star_results <- star_results[rowSums(counts(star_results)) >= 50,]
+star_results
+star_results$hiv_status <- factor(star_results$hiv_status, levels=c("HI", "HUU"))
+# run deseq
+ptm <- proc.time()
+se_star <- DESeq(star_results, fitType="local")
+proc.time() - ptm 
+# normalize counts
+norm_counts <- log2(counts(se_star, normalized = TRUE)+1)
+res <- results(se_star, alpha=0.05)
+# order by p value
+res <- res[order(res$padj),]
+paste("number of genes with adjusted p value lower than 0.05: ", sum(res$padj < 0.05, na.rm=TRUE))
+summary(res)
+# out of 858 with nonzero total read count
+# adjusted p-value < 0.05
+# LFC > 0 (up)       : 36, 4.2%
+# LFC < 0 (down)     : 38, 4.4%
+# outliers [1]       : 335, 39%
+# low counts [2]     : 0, 0%
+# (mean count < 3)
+# [1] see 'cooksCutoff' argument of ?results
+# [2] see 'independentFiltering' argument of ?results
+resultsNames(se_star)
+# HUU is positive, HI negative
+resLFC <- lfcShrink(se_star, coef="hiv_status_HUU_vs_HI", type="apeglm")
+resLFC <- resLFC[order(resLFC$padj),]
+paste("number of genes with adjusted p value lower than 0.05: ", sum(resLFC$padj < 0.05, na.rm=TRUE))
+summary(resLFC)
+# out of 858 with nonzero total read count
+# adjusted p-value < 0.1
+# LFC > 0 (up)       : 49, 5.7%
+# LFC < 0 (down)     : 44, 5.1%
+# outliers [1]       : 335, 39%
+# low counts [2]     : 0, 0%
+# (mean count < 3)
+# [1] see 'cooksCutoff' argument of ?results
+# [2] see 'independentFiltering' argument of ?results
+
+# write results to file
+write.table(resLFC, file="deseq_results_ADS-D-HIvHUU.txt", quote=F, sep="\t")
+# save.image()
+
+## PCA Plot
+# transform for visualizations
+vld <- varianceStabilizingTransformation(se_star, fitType="local")
+pdf("pca_pdvpf_ADS-D-HIvHUU.pdf")
+plotPCA(vld, intgroup=c("hiv_status")) + theme_minimal()
+dev.off()
+system("/home/allie/.iterm2/imgcat pca_pdvpf_ADS-D-HIvHUU.pdf")
+
+### Tree figure
+
+# read back in deseq results
+deres <- read.table("deseq_results_ADS-D-HIvHUU.txt", header=T)
+# merge based on rownames and V2
+deres <- deres %>% 
+  tibble::rownames_to_column("RowNames")
+# merge
+mergedat <- annot %>% 
+  left_join(deres, by = c("V2" = "RowNames"))
+# group by transcript ID, get the average of all numerical values 
+mean_sum <- mergedat %>%
+  group_by(V1) %>%
+  summarize(
+    across(c(baseMean, log2FoldChange, lfcSE, pvalue, padj), 
+           ~ mean(., na.rm = TRUE),
+           .names = "mean_{.col}")
+  )
+# now add in taxonomic identifiers for annotating the tree
+tax <- read.table("annotations.txt", header=T)
+mean_sum <- mean_sum %>% 
+  left_join(tax, by = c("V1" = "seqid"))
+# convert to dataframe 
+mean_sum <- as.data.frame(mean_sum)
+# get genus only column 
+mean_sum <- mean_sum %>%
+  mutate(genus = str_extract(taxonomy, "^[^_ ]+"))
+# make genus a factor
+mean_sum$genus <- as.factor(mean_sum$genus)
+# rename column
+colnames(mean_sum)[colnames(mean_sum) == "V1"] <- "label"
+
+# sanity check -- do the tip labels match up with our mean_sum file?
+tips <- tree$tip.label
+nodes <- mean_sum$label
+setdiff(tips, nodes) # should come back as character(0)
+
+# base tree
+p <- ggtree(tree, layout="fan", open.angle=10, size=0.25)
+
+# genus colors
+gencol <- c(
+    "Actinomyces" = "#F04932",
+    "Bacteria" = "black",
+    "Bulleidia" = "#F8E0B1",
+    "Clostridium" = "#97002E",
+    "Cutibacterium" = "#93FE70",
+    "Kingella" = "#23C0CA",
+    "Streptococcus" = "#1C9D38",
+    "Treponema" = "#0C5B6F", 
+    "unclassified" = "#6C6C6C")
+
+# add genus ring
+p2 <- p + 
+  geom_fruit(
+    data = mean_sum,
+    geom = geom_tile,
+    mapping = aes(y = label, fill = genus),  # Assuming 'label' matches tip labels
+    width = 0.30,  # Adjust ring width
+    offset = 0.05  # Adjust distance from tree
+  ) +
+  scale_fill_manual(
+    name = "Genus",
+    values = gencol,
+    na.value = "grey90"  # Color for NA values
+  ) +
+  guides(fill = guide_legend(
+    ncol = 2,  # Adjust legend columns
+    keywidth = 0.5,
+    keyheight = 0.5
+  ))
+
+# add heatmap ring
+p3 <- p2 +
+  new_scale_fill() +
+  geom_fruit(
+    data = mean_sum,
+    geom = geom_tile,
+    mapping = aes(y = label, fill = mean_log2FoldChange),
+    width = 0.5,
+    offset = 0.15  # Place after genus ring
+  ) +
+  scale_fill_gradient2(
+    name = "log2FC",
+    low = "#D73027",  # low is HI
+    mid = "#f7f7f7",  # White
+    high = "#4575B4",  # high is HUU color
+    midpoint = 0,      # Center at zero
+    na.value = "grey90",
+    limits = c(-5, 5)  # Symmetrical limits
+  )
+
+# finally add barchart showing base mean
+p4 <- p3 +
+  new_scale_fill() +  # Create new scale for this layer
+  geom_fruit(
+    data = mean_sum,
+    geom = geom_bar,
+    mapping = aes(
+      y = label, 
+      x = mean_baseMean,  
+      fill = genus   # color bars by genus
+    ),
+    stat = "identity",
+    orientation = "y",
+    width = 0.5,     # Width of the bar chart ring
+    offset = 0.15      # Position after previous rings
+  ) +
+  # Option 1: Use genus colors consistent with first ring
+  scale_fill_manual(
+    values = gencol,
+    guide = "none"    # Hide legend since we already have genus colors
+  ) +
+  # Add space between rings
+  theme(legend.position = "right")
+
+p_final <- p4 +
+  # Add significance markers
+  geom_fruit(
+    data = subset(mean_sum, mean_padj < 0.05),
+    geom = geom_point,
+    mapping = aes(y = label),
+    shape = 8,          # Star shape
+    size = 0.5,         # Adjust size
+    color = "black",    # Marker color
+    fill = "black",     # For shapes with fill
+    stroke = 0.5,       # Border thickness
+    offset = 0.005       # Position outside other rings
+  )
+
+# how many up or down regulated taxa?
+mean_sum %>%
+  filter(mean_padj < 0.05) %>%
+  summarize(
+    total_sig = n(),
+    upregulated = sum(mean_log2FoldChange > 0, na.rm = TRUE),
+    downregulated = sum(mean_log2FoldChange < 0, na.rm = TRUE),
+    .groups = 'drop'
+  )
+
+#   total_sig upregulated downregulated
+# 1        26          14            12
+
+pdf("denovo_tree.D-HIvHUU.pdf")
+p_final
+dev.off()
+system("/home/allie/.iterm2/imgcat denovo_tree.D-HIvHUU.pdf")
+
+# taxa stacked plot
+mean_sum_enriched <- mean_sum %>%
+  mutate(
+    HIV_status = case_when(
+      mean_log2FoldChange > 0 & mean_padj < 0.05 ~ "HUU_upregulated",
+      mean_log2FoldChange < 0 & mean_padj < 0.05 ~ "HI_upregulated",
+      TRUE ~ "Non_sig"  # Not significant
+    ),
+    Genus = str_extract(taxonomy, "^[^_]+")  # Extract genus (e.g., "Streptococcus" from "Streptococcus_sp.")
+  ) %>%
+  filter(HIV_status != "Non_sig")  # Keep only significant genes
+
+genus_counts <- mean_sum_enriched %>%
+  count(HIV_status, Genus) %>%
+  group_by(HIV_status) %>%
+  mutate(Percent = 100 * n / sum(n)) %>%  # Convert to percentage
+  ungroup()
+
+# Plot 
+p <- ggplot(genus_counts, aes(x = HIV_status, y = Percent, fill = Genus)) +
+  geom_col(position = "stack", color = "black", width = 0.7) +
+  geom_text(
+    aes(label = ifelse(Percent > 5, sprintf("%.1f%%", Percent), "")),  # Label only >5%
+    position = position_stack(vjust = 0.5),
+    size = 3
+  ) +
+  scale_fill_manual(values = gencol) +  
+  labs(
+    title = "Taxonomic Distribution of Upregulated Genes",
+    x = "HIV Status",
+    y = "Percentage of Upregulated Genes",
+    fill = "Genus"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    legend.position = "right"
+  )
+
+pdf("genera_prop.D-HIvHUU.pdf")
+p
+dev.off()
+system("/home/allie/.iterm2/imgcat genera_prop.D-HIvHUU.pdf")
+```
+
+### 14. Comparing diseased teeth HEU vs HUU
+
+```R
+# filter genecounts and metadata to only include diseased teeth
+submap <- metadata[metadata$tooth_health == "D",]
+# HEU vs HUU
+submap <- submap[submap$hiv_status == "HEU" | submap$hiv_status == "HUU",]
+dim(submap)
+# filter genecounts by submap samples
+subcount <- genecounts[, colnames(genecounts) %in% row.names(submap)]
+dim(subcount)
+# add pseudocount to avoid errors with size factor estimation
+subcount <- subcount + 1
+# reorder columns by metadata 
+submap <- submap[order(colnames(subcount)),]    
+# colnames(genecounts)
+# rownames(metadata)
+# check to make sure that sample ids match between gene counts and metadata
+table(colnames(subcount)==submap$sample_id) # should return all true
+
+# create deseq object
+star_results <- DESeqDataSetFromMatrix(countData = subcount, colData = submap, design = ~hiv_status)
+star_results <- star_results[rowSums(counts(star_results)) >= 50,]
+star_results
+star_results$hiv_status <- factor(star_results$hiv_status, levels=c("HEU", "HUU"))
+# run deseq
+ptm <- proc.time()
+se_star <- DESeq(star_results, fitType="local")
+proc.time() - ptm 
+# normalize counts
+norm_counts <- log2(counts(se_star, normalized = TRUE)+1)
+res <- results(se_star, alpha=0.05)
+# order by p value
+res <- res[order(res$padj),]
+paste("number of genes with adjusted p value lower than 0.05: ", sum(res$padj < 0.05, na.rm=TRUE))
+summary(res)
+# out of 856 with nonzero total read count
+# adjusted p-value < 0.05
+# LFC > 0 (up)       : 125, 15%
+# LFC < 0 (down)     : 66, 7.7%
+# outliers [1]       : 335, 39%
+# low counts [2]     : 33, 3.9%
+# (mean count < 7)
+# [1] see 'cooksCutoff' argument of ?results
+# [2] see 'independentFiltering' argument of ?results
+resultsNames(se_star)
+# HUU is positive, HEU negative
+resLFC <- lfcShrink(se_star, coef="hiv_status_HUU_vs_HEU", type="apeglm")
+resLFC <- resLFC[order(resLFC$padj),]
+paste("number of genes with adjusted p value lower than 0.05: ", sum(resLFC$padj < 0.05, na.rm=TRUE))
+summary(resLFC)
+# out of 856 with nonzero total read count
+# adjusted p-value < 0.1
+# LFC > 0 (up)       : 160, 19%
+# LFC < 0 (down)     : 78, 9.1%
+# outliers [1]       : 335, 39%
+# low counts [2]     : 0, 0%
+# (mean count < 3)
+# [1] see 'cooksCutoff' argument of ?results
+# [2] see 'independentFiltering' argument of ?results
+
+# write results to file
+write.table(resLFC, file="deseq_results_ADS-D-HEUvHUU.txt", quote=F, sep="\t")
+# save.image()
+
+## PCA Plot
+# transform for visualizations
+vld <- varianceStabilizingTransformation(se_star, fitType="local")
+pdf("pca_pdvpf_ADS-D-HEUvHUU.pdf")
+plotPCA(vld, intgroup=c("hiv_status")) + theme_minimal()
+dev.off()
+system("/home/allie/.iterm2/imgcat pca_pdvpf_ADS-D-HEUvHUU.pdf")
+
+### Tree figure
+
+# read back in deseq results
+deres <- read.table("deseq_results_ADS-D-HEUvHUU.txt", header=T)
+# merge based on rownames and V2
+deres <- deres %>% 
+  tibble::rownames_to_column("RowNames")
+# merge
+mergedat <- annot %>% 
+  left_join(deres, by = c("V2" = "RowNames"))
+# group by transcript ID, get the average of all numerical values 
+mean_sum <- mergedat %>%
+  group_by(V1) %>%
+  summarize(
+    across(c(baseMean, log2FoldChange, lfcSE, pvalue, padj), 
+           ~ mean(., na.rm = TRUE),
+           .names = "mean_{.col}")
+  )
+# now add in taxonomic identifiers for annotating the tree
+tax <- read.table("annotations.txt", header=T)
+mean_sum <- mean_sum %>% 
+  left_join(tax, by = c("V1" = "seqid"))
+# convert to dataframe 
+mean_sum <- as.data.frame(mean_sum)
+# get genus only column 
+mean_sum <- mean_sum %>%
+  mutate(genus = str_extract(taxonomy, "^[^_ ]+"))
+# make genus a factor
+mean_sum$genus <- as.factor(mean_sum$genus)
+# rename column
+colnames(mean_sum)[colnames(mean_sum) == "V1"] <- "label"
+
+# sanity check -- do the tip labels match up with our mean_sum file?
+tips <- tree$tip.label
+nodes <- mean_sum$label
+setdiff(tips, nodes) # should come back as character(0)
+
+# base tree
+p <- ggtree(tree, layout="fan", open.angle=10, size=0.25)
+
+# genus colors
+gencol <- c(
+    "Actinomyces" = "#F04932",
+    "Bacteria" = "black",
+    "Bulleidia" = "#F8E0B1",
+    "Clostridium" = "#97002E",
+    "Cutibacterium" = "#93FE70",
+    "Kingella" = "#23C0CA",
+    "Streptococcus" = "#1C9D38",
+    "Treponema" = "#0C5B6F", 
+    "unclassified" = "#6C6C6C")
+
+# add genus ring
+p2 <- p + 
+  geom_fruit(
+    data = mean_sum,
+    geom = geom_tile,
+    mapping = aes(y = label, fill = genus),  # Assuming 'label' matches tip labels
+    width = 0.30,  # Adjust ring width
+    offset = 0.05  # Adjust distance from tree
+  ) +
+  scale_fill_manual(
+    name = "Genus",
+    values = gencol,
+    na.value = "grey90"  # Color for NA values
+  ) +
+  guides(fill = guide_legend(
+    ncol = 2,  # Adjust legend columns
+    keywidth = 0.5,
+    keyheight = 0.5
+  ))
+
+# add heatmap ring
+p3 <- p2 +
+  new_scale_fill() +
+  geom_fruit(
+    data = mean_sum,
+    geom = geom_tile,
+    mapping = aes(y = label, fill = mean_log2FoldChange),
+    width = 0.5,
+    offset = 0.15  # Place after genus ring
+  ) +
+  scale_fill_gradient2(
+    name = "log2FC",
+    low = "#D73027",  # low is HI
+    mid = "#f7f7f7",  # White
+    high = "#4575B4",  # high is HUU color
+    midpoint = 0,      # Center at zero
+    na.value = "grey90",
+    limits = c(-5, 5)  # Symmetrical limits
+  )
+
+# finally add barchart showing base mean
+p4 <- p3 +
+  new_scale_fill() +  # Create new scale for this layer
+  geom_fruit(
+    data = mean_sum,
+    geom = geom_bar,
+    mapping = aes(
+      y = label, 
+      x = mean_baseMean,  
+      fill = genus   # color bars by genus
+    ),
+    stat = "identity",
+    orientation = "y",
+    width = 0.5,     # Width of the bar chart ring
+    offset = 0.15      # Position after previous rings
+  ) +
+  # Option 1: Use genus colors consistent with first ring
+  scale_fill_manual(
+    values = gencol,
+    guide = "none"    # Hide legend since we already have genus colors
+  ) +
+  # Add space between rings
+  theme(legend.position = "right")
+
+p_final <- p4 +
+  # Add significance markers
+  geom_fruit(
+    data = subset(mean_sum, mean_padj < 0.05),
+    geom = geom_point,
+    mapping = aes(y = label),
+    shape = 8,          # Star shape
+    size = 0.5,         # Adjust size
+    color = "black",    # Marker color
+    fill = "black",     # For shapes with fill
+    stroke = 0.5,       # Border thickness
+    offset = 0.005       # Position outside other rings
+  )
+
+# how many up or down regulated taxa?
+mean_sum %>%
+  filter(mean_padj < 0.05) %>%
+  summarize(
+    total_sig = n(),
+    upregulated = sum(mean_log2FoldChange > 0, na.rm = TRUE),
+    downregulated = sum(mean_log2FoldChange < 0, na.rm = TRUE),
+    .groups = 'drop'
+  )
+
+#   total_sig upregulated downregulated
+# 1        68          44            24
+
+pdf("denovo_tree.D-HEUvHUU.pdf")
+p_final
+dev.off()
+system("/home/allie/.iterm2/imgcat denovo_tree.D-HEUvHUU.pdf")
+
+# taxa stacked plot
+mean_sum_enriched <- mean_sum %>%
+  mutate(
+    HIV_status = case_when(
+      mean_log2FoldChange > 0 & mean_padj < 0.05 ~ "HUU_upregulated",
+      mean_log2FoldChange < 0 & mean_padj < 0.05 ~ "HEU_upregulated",
+      TRUE ~ "Non_sig"  # Not significant
+    ),
+    Genus = str_extract(taxonomy, "^[^_]+")  # Extract genus (e.g., "Streptococcus" from "Streptococcus_sp.")
+  ) %>%
+  filter(HIV_status != "Non_sig")  # Keep only significant genes
+
+genus_counts <- mean_sum_enriched %>%
+  count(HIV_status, Genus) %>%
+  group_by(HIV_status) %>%
+  mutate(Percent = 100 * n / sum(n)) %>%  # Convert to percentage
+  ungroup()
+
+# Plot 
+p <- ggplot(genus_counts, aes(x = HIV_status, y = Percent, fill = Genus)) +
+  geom_col(position = "stack", color = "black", width = 0.7) +
+  geom_text(
+    aes(label = ifelse(Percent > 5, sprintf("%.1f%%", Percent), "")),  # Label only >5%
+    position = position_stack(vjust = 0.5),
+    size = 3
+  ) +
+  scale_fill_manual(values = gencol) +  
+  labs(
+    title = "Taxonomic Distribution of Upregulated Genes",
+    x = "HIV Status",
+    y = "Percentage of Upregulated Genes",
+    fill = "Genus"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    legend.position = "right"
+  )
+
+pdf("genera_prop.D-HEUvHUU.pdf")
+p
+dev.off()
+system("/home/allie/.iterm2/imgcat genera_prop.D-HEUvHUU.pdf")
+```

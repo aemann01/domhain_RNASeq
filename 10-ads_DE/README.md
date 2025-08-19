@@ -3,7 +3,9 @@
 ### 1. Load environment
 
 ```bash
+cd /home/allie/domhain_RNAseq/07-ads_expression
 conda activate 2024-HIV_RNASeq
+R
 ```
 
 ### 2. DESeq2 Analysis of all samples Healthy teeth vs teeth with a Dentin cavity (H v D)
